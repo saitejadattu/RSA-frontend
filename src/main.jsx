@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   AlertCircle,
+  ArrowLeft,
   ArrowRight,
   BadgeCheck,
   BarChart3,
@@ -579,6 +580,14 @@ function formatStatus(status) {
   return (status || "applied").replaceAll("_", " ");
 }
 
+function companyStatusClass(value) {
+  const status = (value || "").toLowerCase();
+  if (status.includes("hired") && !status.includes("not")) return "good";
+  if (status.includes("progress")) return "warn";
+  if (status.includes("not hired") || status.includes("reject") || status.includes("drop")) return "bad";
+  return "neutral";
+}
+
 function ApplicationMini({ application }) {
   return (
     <div className="shortlist-item">
@@ -635,7 +644,7 @@ function AdminDashboard({ adminToken, onLogout }) {
   const [dashboard, setDashboard] = useState(null);
   const [students, setStudents] = useState([]);
   const [activeView, setActiveView] = useState("overview");
-  const [selectedStudent, setSelectedStudent] = useState(null);
+  const [companyId, setCompanyId] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [loadingStudents, setLoadingStudents] = useState(false);
@@ -661,6 +670,17 @@ function AdminDashboard({ adminToken, onLogout }) {
   function openStudentsView() {
     setActiveView("students");
     if (!students.length) loadStudents();
+  }
+
+  function openCompany(company) {
+    if (!company?.id) return;
+    setCompanyId(company.id);
+    setActiveView("company");
+  }
+
+  function backToOverview() {
+    setActiveView("overview");
+    setCompanyId(null);
   }
 
   useEffect(() => {
@@ -692,6 +712,10 @@ function AdminDashboard({ adminToken, onLogout }) {
       </aside>
 
       <section className="dashboard-main">
+        {activeView === "company" ? (
+          <CompanyDetailView adminToken={adminToken} companyId={companyId} onBack={backToOverview} />
+        ) : (
+        <>
         <header className="topbar">
           <div>
             <p className="eyebrow">Admin Dashboard</p>
@@ -711,11 +735,7 @@ function AdminDashboard({ adminToken, onLogout }) {
         {error ? <StatusMessage error={error} /> : null}
 
         {activeView === "students" ? (
-          <AdminStudentsView
-            students={students}
-            loading={loadingStudents}
-            onSelectStudent={setSelectedStudent}
-          />
+          <AdminStudentsView students={students} loading={loadingStudents} />
         ) : (
           <>
             <section className="stats-grid admin-stats compact-stats">
@@ -728,12 +748,13 @@ function AdminDashboard({ adminToken, onLogout }) {
               <div className="panel wide">
                 <div className="panel-title">
                   <BriefcaseBusiness size={20} />
-                  <h2>Recent Opportunities</h2>
+                  <h2>Opportunities</h2>
+                  {recentOpportunities.length ? <span className="title-count">{recentOpportunities.length}</span> : null}
                 </div>
                 {loading ? (
                   <PanelLoader />
                 ) : recentOpportunities.length ? (
-                  <div className="admin-table opportunities-table">
+                  <div className="admin-table opportunities-table scrollable">
                     <div className="admin-head">
                       <span>Company</span>
                       <span>Role</span>
@@ -743,7 +764,14 @@ function AdminDashboard({ adminToken, onLogout }) {
                     {recentOpportunities.map((opportunity) => (
                       <div className="admin-row" key={opportunity.id}>
                         <div>
-                          <strong>{opportunity.company?.name || "Company"}</strong>
+                          <button
+                            type="button"
+                            className="link-button"
+                            onClick={() => openCompany(opportunity.company)}
+                            title="View company detail"
+                          >
+                            {opportunity.company?.name || "Company"}
+                          </button>
                           <span>{opportunity.location || "Location not added"}</span>
                         </div>
                         <div>
@@ -767,54 +795,429 @@ function AdminDashboard({ adminToken, onLogout }) {
             </section>
           </>
         )}
+        </>
+        )}
       </section>
-
-      {selectedStudent ? (
-        <StudentDetailModal student={selectedStudent} onClose={() => setSelectedStudent(null)} />
-      ) : null}
     </main>
   );
 }
 
-function AdminStudentsView({ students, loading, onSelectStudent }) {
+function CompanyDetailView({ adminToken, companyId, onBack }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [selectedOppId, setSelectedOppId] = useState(null);
+  const [oppData, setOppData] = useState(null);
+  const [loadingOpp, setLoadingOpp] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    setLoading(true);
+    setError("");
+    setSelectedOppId(null);
+    setOppData(null);
+    apiRequest(`/admin/companies/${companyId}`, { adminToken })
+      .then((detail) => {
+        if (!live) return;
+        setData(detail);
+        if (detail.opportunity_count === 1 && detail.opportunities?.[0]) {
+          setSelectedOppId(detail.opportunities[0].id);
+        }
+      })
+      .catch((err) => live && setError(err.message))
+      .finally(() => live && setLoading(false));
+    return () => {
+      live = false;
+    };
+  }, [companyId, adminToken]);
+
+  useEffect(() => {
+    if (!selectedOppId) {
+      setOppData(null);
+      return;
+    }
+    let live = true;
+    setLoadingOpp(true);
+    apiRequest(`/admin/opportunities/${selectedOppId}`, { adminToken })
+      .then((detail) => live && setOppData(detail))
+      .catch((err) => live && setError(err.message))
+      .finally(() => live && setLoadingOpp(false));
+    return () => {
+      live = false;
+    };
+  }, [selectedOppId, adminToken]);
+
+  const company = data?.company;
+  const opportunities = data?.opportunities || [];
+  const stats = data?.stats || {};
+  const multi = (data?.opportunity_count || 0) > 1;
+
+  return (
+    <>
+      <header className="topbar">
+        <div className="topbar-lead">
+          <button type="button" className="back-button" onClick={onBack}>
+            <ArrowLeft size={17} /> Back
+          </button>
+          <div>
+            <p className="eyebrow">Company</p>
+            <h1>{company?.name || "Company"}</h1>
+          </div>
+        </div>
+      </header>
+
+      {error ? <StatusMessage error={error} /> : null}
+
+      {loading ? (
+        <PanelLoader />
+      ) : !data ? (
+        <div className="empty-state compact"><p>Company not found.</p></div>
+      ) : (
+        <>
+          <section className="stats-grid admin-stats">
+            <Metric icon={<BriefcaseBusiness size={20} />} label="Opportunities" value={data.opportunity_count ?? 0} />
+            <Metric icon={<UsersRound size={20} />} label="Applied" value={stats.applied_count ?? 0} />
+            <Metric icon={<BadgeCheck size={20} />} label="Shortlisted" value={stats.shortlisted_count ?? 0} />
+            <Metric icon={<BarChart3 size={20} />} label="Responses" value={stats.response_count ?? 0} />
+          </section>
+
+          {multi && !selectedOppId ? (
+            <OpportunityChooser opportunities={opportunities} onSelect={setSelectedOppId} />
+          ) : null}
+
+          {selectedOppId ? (
+            <>
+              {multi ? (
+                <button type="button" className="back-button subtle" onClick={() => setSelectedOppId(null)}>
+                  <ArrowLeft size={16} /> Other opportunities ({data.opportunity_count})
+                </button>
+              ) : null}
+              {loadingOpp || !oppData ? <PanelLoader /> : <OpportunityDetail detail={oppData} />}
+            </>
+          ) : null}
+        </>
+      )}
+    </>
+  );
+}
+
+function OpportunityChooser({ opportunities, onSelect }) {
+  return (
+    <section className="panel wide">
+      <div className="panel-title">
+        <BriefcaseBusiness size={20} />
+        <h2>Choose an opportunity</h2>
+        <span className="title-count">{opportunities.length}</span>
+      </div>
+      <p className="chooser-hint">This company has multiple opportunities. Pick one to see its detail.</p>
+      <div className="chooser-list">
+        {opportunities.map((opportunity) => (
+          <button key={opportunity.id} type="button" className="chooser-card" onClick={() => onSelect(opportunity.id)}>
+            <div className="chooser-role">
+              <strong>{opportunity.role || "Role not mapped"}</strong>
+              <span>{opportunity.tech_stack || opportunity.must_have_skills || "Skills not mapped"}</span>
+            </div>
+            <div className="chooser-meta">
+              <span>{opportunity.location || "Location N/A"}</span>
+              <span>{formatDate(opportunity.opportunity_received_at)}</span>
+            </div>
+            <div className="chooser-counts">
+              <span className="mini-count">{opportunity.applied_count ?? 0} applied</span>
+              <span className="mini-count good">{opportunity.shortlisted_count ?? 0} shortlisted</span>
+              {opportunity.company_status ? (
+                <span className={`status-pill ${companyStatusClass(opportunity.company_status)}`}>{opportunity.company_status}</span>
+              ) : null}
+            </div>
+            <ArrowRight size={18} className="chooser-arrow" />
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function DetailGroup({ title, fields }) {
+  const rows = fields.filter(([, value]) => value !== null && value !== undefined && value !== "");
+  if (!rows.length) return null;
+  return (
+    <>
+      <h3 className="detail-subhead">{title}</h3>
+      <div className="profile-list detail-grid">
+        {rows.map(([label, value]) => (
+          <div key={label}>
+            <span>{label}</span>
+            <strong>{value}</strong>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+function OpportunityDetail({ detail }) {
+  const o = detail.opportunity || {};
+  const stats = detail.stats || {};
+  const applicants = detail.applicants || [];
+
+  const keyFacts = [
+    ["Role", o.role],
+    ["Must-have skills", o.must_have_skills],
+    ["Good-to-have skills", o.good_to_have_skills],
+    ["Stipend", o.stipend],
+    ["Location", o.location],
+    ["Duration", o.duration],
+    ["Day & timings", o.day_timings],
+    ["Positions", o.positions],
+    ["CRM POC", o.crm_poc],
+    ["Student-side status", o.student_side_status],
+    ["Received", o.opportunity_received_on || (o.opportunity_received_at ? formatDate(o.opportunity_received_at) : null)],
+    ["Received time", o.received_time],
+  ];
+
+  const pipeline = [
+    ["Profiles requested", o.profiles_requested],
+    ["Profiles shared", o.profiles_shared],
+    ["Mapping pool", o.mapping_pool],
+    ["Eligible (as per pref)", o.eligible_as_per_pref],
+    ["Filled form", o.filled_form_count],
+    ["Interested", o.interested_count],
+    ["Shortlists (CRM)", o.shortlists_count],
+    ["Date of sharing profiles", o.date_of_sharing_profiles],
+  ];
+
+  const process = [
+    ["Process date/time", o.process_datetime],
+    ["Screening / telephonic", o.screening_round],
+    ["Assignment round", o.assignment_round],
+    ["TR 1", o.tr_1],
+    ["Next process", o.next_process],
+    ["Interview process", o.interview_process],
+    ["Scheduled date", o.scheduled_date],
+  ];
+
+  const notes = [
+    ["Company feedback", o.company_feedback],
+    ["Process details", o.process_details],
+    ["Action items", o.action_items],
+    ["Hiring intelligence", o.hiring_intelligence],
+    ["RSA notes", o.rsa_notes],
+  ].filter(([, value]) => Boolean(value));
+
+  const links = [
+    ["Company sheet", o.company_sheet],
+    ["Student response sheet", o.student_response_sheet],
+    ["HubSpot", o.hubspot_link],
+  ].filter(([, href]) => href && String(href).startsWith("http"));
+
+  return (
+    <>
+      <section className="stats-grid admin-stats">
+        <Metric icon={<UsersRound size={20} />} label="Applied" value={stats.applied_count ?? 0} />
+        <Metric icon={<BadgeCheck size={20} />} label="Shortlisted" value={stats.shortlisted_count ?? 0} />
+        <Metric icon={<XCircle size={20} />} label="Rejected" value={stats.rejected_count ?? 0} />
+        <Metric icon={<BarChart3 size={20} />} label="Responses" value={stats.response_count ?? 0} />
+      </section>
+
+      <section className="content-grid admin-grid">
+        <div className="panel wide">
+          <div className="panel-title">
+            <FileText size={20} />
+            <h2>{o.role || "Opportunity"}</h2>
+            {o.company_status ? (
+              <span className={`status-pill ${companyStatusClass(o.company_status)}`}>{o.company_status}</span>
+            ) : null}
+          </div>
+
+          <DetailGroup title="Key facts" fields={keyFacts} />
+          <DetailGroup title="CRM pipeline" fields={pipeline} />
+          <DetailGroup title="Process & rounds" fields={process} />
+
+          {notes.length ? (
+            <div className="notes-stack">
+              {notes.map(([label, value]) => (
+                <div className="detail-note" key={label}>
+                  <strong>{label}</strong>
+                  <p>{value}</p>
+                </div>
+              ))}
+            </div>
+          ) : null}
+
+          {links.length ? (
+            <div className="detail-links">
+              {links.map(([label, href]) => (
+                <a key={label} href={href} target="_blank" rel="noreferrer">
+                  <ExternalLink size={14} />
+                  {label}
+                </a>
+              ))}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="panel wide">
+          <div className="panel-title">
+            <UsersRound size={20} />
+            <h2>Applicants</h2>
+            <span className="title-count">{applicants.length}</span>
+          </div>
+          {applicants.length ? (
+            <div className="admin-table applicants-table">
+              <div className="admin-head">
+                <span>Student</span>
+                <span>Status</span>
+                <span>Applied</span>
+                <span>Links</span>
+              </div>
+              {applicants.map((applicant) => (
+                <ApplicantRow key={applicant.id} application={applicant} />
+              ))}
+            </div>
+          ) : (
+            <div className="empty-state compact"><p>No applicants yet.</p></div>
+          )}
+        </div>
+      </section>
+    </>
+  );
+}
+
+function ApplicantRow({ application }) {
+  const student = application.student || {};
+  const links = [
+    ["Resume", application.resume_link],
+    ["Project", application.project_link],
+    ["GitHub", application.github_link],
+  ].filter(([, href]) => Boolean(href));
+
+  return (
+    <div className="admin-row applicants-row">
+      <div>
+        <strong>{student.name || "Student"}</strong>
+        <span>{student.phone || student.email || "Contact not added"}</span>
+      </div>
+      <div>
+        <span className={`status-pill ${statusClass(application.status)}`}>{formatStatus(application.status)}</span>
+      </div>
+      <div>
+        <span>{formatDate(application.applied_at)}</span>
+      </div>
+      <div className="link-group">
+        {links.length ? (
+          links.map(([label, href]) => (
+            <a key={label} href={href} target="_blank" rel="noreferrer" title={label}>
+              <ExternalLink size={14} />
+              {label}
+            </a>
+          ))
+        ) : (
+          <span className="muted">No links</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const EXPAND_LABELS = {
+  all: "Applied companies",
+  shortlisted: "Shortlisted companies",
+  not_shortlisted: "Not shortlisted companies",
+};
+const EXPAND_PREVIEW = 3;
+
+function listForMode(student, mode) {
+  if (mode === "shortlisted") return student.shortlisted_applications || [];
+  if (mode === "not_shortlisted") return student.not_shortlisted_applications || [];
+  return student.applications || [];
+}
+
+function AdminStudentsView({ students, loading }) {
+  const [expanded, setExpanded] = useState(null);
+  const [showAll, setShowAll] = useState(false);
+
   if (loading) return <PanelLoader />;
+
+  function toggle(student, mode) {
+    setShowAll(false);
+    setExpanded((current) =>
+      current && current.id === student.id && current.mode === mode ? null : { id: student.id, mode },
+    );
+  }
+
+  function countButton(student, mode, count, variant) {
+    const isActive = expanded && expanded.id === student.id && expanded.mode === mode;
+    return (
+      <button
+        type="button"
+        className={`table-count ${variant} ${isActive ? "active" : ""}`.trim()}
+        disabled={!count}
+        onClick={() => toggle(student, mode)}
+      >
+        {count ?? 0}
+      </button>
+    );
+  }
 
   return (
     <section className="panel wide">
       <div className="panel-title">
         <UsersRound size={20} />
         <h2>All Students</h2>
+        {students.length ? <span className="title-count">{students.length}</span> : null}
       </div>
       {students.length ? (
         <div className="admin-table students-table">
           <div className="admin-head">
             <span>Student</span>
-            <span>Education</span>
             <span>Applied</span>
             <span>Shortlisted</span>
             <span>Not Shortlisted</span>
           </div>
-          {students.map((student) => (
-            <div className="admin-row student-row" key={student.id}>
-              <div>
-                <strong>{student.name || "Student"}</strong>
-                <span>{student.phone || student.email || "Contact not added"}</span>
-              </div>
-              <div>
-                <strong>{student.college || "College not added"}</strong>
-                <span>{[student.degree, student.department, student.year_of_passing].filter(Boolean).join(" / ") || "Education not added"}</span>
-              </div>
-              <button type="button" className="table-count" onClick={() => onSelectStudent(student)}>
-                {student.application_count ?? 0}
-              </button>
-              <button type="button" className="table-count good" onClick={() => onSelectStudent({ ...student, detailMode: "shortlisted" })}>
-                {student.shortlisted_count ?? 0}
-              </button>
-              <button type="button" className="table-count warn" onClick={() => onSelectStudent({ ...student, detailMode: "not_shortlisted" })}>
-                {student.not_shortlisted_count ?? 0}
-              </button>
-            </div>
-          ))}
+          {students.map((student) => {
+            const isOpen = expanded && expanded.id === student.id;
+            const list = isOpen ? listForMode(student, expanded.mode) : [];
+            const visible = showAll ? list : list.slice(0, EXPAND_PREVIEW);
+            const hidden = list.length - visible.length;
+            return (
+              <React.Fragment key={student.id}>
+                <div className="admin-row student-row">
+                  <div>
+                    <strong>{student.name || "Student"}</strong>
+                    <span>{student.phone || student.email || "Contact not added"}</span>
+                  </div>
+                  {countButton(student, "all", student.application_count, "")}
+                  {countButton(student, "shortlisted", student.shortlisted_count, "good")}
+                  {countButton(student, "not_shortlisted", student.not_shortlisted_count, "warn")}
+                </div>
+                {isOpen ? (
+                  <div className="student-expand">
+                    <div className="student-expand-head">
+                      <span>{EXPAND_LABELS[expanded.mode]}</span>
+                      <button type="button" className="expand-close" onClick={() => setExpanded(null)} title="Close">
+                        <XCircle size={16} />
+                      </button>
+                    </div>
+                    {list.length ? (
+                      <>
+                        <div className="expand-list">
+                          {visible.map((application) => (
+                            <ExpandCompanyRow key={application.id} application={application} />
+                          ))}
+                        </div>
+                        {list.length > EXPAND_PREVIEW ? (
+                          <button type="button" className="expand-toggle" onClick={() => setShowAll((value) => !value)}>
+                            {showAll ? "Show less" : `Show ${hidden} more`}
+                          </button>
+                        ) : null}
+                      </>
+                    ) : (
+                      <p className="expand-empty">No companies to show here.</p>
+                    )}
+                  </div>
+                ) : null}
+              </React.Fragment>
+            );
+          })}
         </div>
       ) : (
         <div className="empty-state compact"><p>No students found.</p></div>
@@ -823,49 +1226,7 @@ function AdminStudentsView({ students, loading, onSelectStudent }) {
   );
 }
 
-function StudentDetailModal({ student, onClose }) {
-  const mode = student.detailMode || "all";
-  const applications =
-    mode === "shortlisted"
-      ? student.shortlisted_applications || []
-      : mode === "not_shortlisted"
-        ? student.not_shortlisted_applications || []
-        : student.applications || [];
-  const title =
-    mode === "shortlisted"
-      ? "Shortlisted Companies"
-      : mode === "not_shortlisted"
-        ? "Not Shortlisted Companies"
-        : "Applied Companies";
-
-  return (
-    <div className="modal-backdrop" role="presentation" onClick={onClose}>
-      <section className="modal-panel" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
-        <div className="modal-header">
-          <div>
-            <p className="eyebrow">{student.name}</p>
-            <h2>{title}</h2>
-          </div>
-          <button className="icon-button" type="button" onClick={onClose} title="Close">
-            <XCircle size={18} />
-          </button>
-        </div>
-        {applications.length ? (
-          <div className="modal-list">
-            {applications.map((application) => (
-              <AdminApplicationRow key={application.id} application={application} />
-            ))}
-          </div>
-        ) : (
-          <div className="empty-state compact"><p>No companies found for this view.</p></div>
-        )}
-      </section>
-    </div>
-  );
-}
-
-function AdminApplicationRow({ application }) {
-  const hasStudent = Boolean(application.student);
+function ExpandCompanyRow({ application }) {
   const links = [
     ["Resume", application.resume_link],
     ["Project", application.project_link],
@@ -873,24 +1234,23 @@ function AdminApplicationRow({ application }) {
   ].filter(([, href]) => Boolean(href));
 
   return (
-    <div className="admin-row">
-      <div>
-        <strong>{hasStudent ? application.student?.name : application.company?.name || "Company"}</strong>
-        <span>{hasStudent ? application.student?.phone || application.student?.email || "Contact not added" : application.opportunity?.location || "Location not added"}</span>
+    <div className="expand-row">
+      <div className="expand-company">
+        <strong>{application.company?.name || "Company"}</strong>
+        <span>{application.opportunity?.role || "Role not mapped"}</span>
       </div>
-      <div>
-        <strong>{hasStudent ? application.company?.name || "Company" : application.opportunity?.role || "Role not mapped"}</strong>
-        <span>{hasStudent ? application.opportunity?.role || "Role not mapped" : application.opportunity?.tech_stack || application.opportunity?.must_have_skills || "Skills not mapped"}</span>
-      </div>
-      <div>
+      <div className="expand-status">
         <span className={`status-pill ${statusClass(application.status)}`}>{formatStatus(application.status)}</span>
-        <span>{formatDate(application.applied_at)}</span>
+        <span className="date-line">
+          <CalendarClock size={13} />
+          {formatDate(application.applied_at)}
+        </span>
       </div>
       <div className="link-group">
         {links.length ? (
           links.map(([label, href]) => (
             <a key={label} href={href} target="_blank" rel="noreferrer" title={label}>
-              <ExternalLink size={16} />
+              <ExternalLink size={14} />
               {label}
             </a>
           ))
