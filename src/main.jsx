@@ -15,6 +15,7 @@ import {
   Eye,
   EyeOff,
   FileText,
+  Github,
   KeyRound,
   Loader2,
   LogOut,
@@ -24,6 +25,7 @@ import {
   UserRound,
   UsersRound,
   XCircle,
+  Code,
 } from "lucide-react";
 import "./styles.css";
 
@@ -580,6 +582,13 @@ function formatStatus(status) {
   return (status || "applied").replaceAll("_", " ");
 }
 
+function getLinkIcon(label) {
+  if (label?.toLowerCase() === "resume") return <FileText size={18} />;
+  if (label?.toLowerCase() === "github") return <Github size={18} />;
+  if (label?.toLowerCase() === "project") return <Code size={18} />;
+  return <ExternalLink size={18} />;
+}
+
 function companyStatusClass(value) {
   const status = (value || "").toLowerCase();
   if (status.includes("hired") && !status.includes("not")) return "good";
@@ -627,9 +636,8 @@ function ApplicationRow({ application }) {
       <div className="link-group">
         {links.length ? (
           links.map(([label, href]) => (
-            <a key={label} href={href} target="_blank" rel="noreferrer" title={label}>
-              <ExternalLink size={16} />
-              {label}
+            <a key={label} href={href} target="_blank" rel="noreferrer" title={label} className="icon-link">
+              {getLinkIcon(label)}
             </a>
           ))
         ) : (
@@ -648,6 +656,9 @@ function AdminDashboard({ adminToken, onLogout }) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [loadingStudents, setLoadingStudents] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [sortBy, setSortBy] = useState("recent");
+  const [filterByRole, setFilterByRole] = useState("all");
 
   function loadDashboard() {
     setLoading(true);
@@ -689,6 +700,39 @@ function AdminDashboard({ adminToken, onLogout }) {
 
   const summary = dashboard?.summary || {};
   const recentOpportunities = dashboard?.recent_opportunities || [];
+
+  // Filter opportunities based on search term and role filter
+  const filteredOpportunities = recentOpportunities.filter((opp) => {
+    const matchesSearch = (opp.company?.name || "").toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesRole = filterByRole === "all" || (opp.role || "").toLowerCase() === filterByRole.toLowerCase();
+    return matchesSearch && matchesRole;
+  });
+
+  // Sort opportunities
+  const sortedOpportunities = [...filteredOpportunities].sort((a, b) => {
+    if (sortBy === "recent") {
+      const dateA = new Date(a.opportunity_received_at || 0).getTime();
+      const dateB = new Date(b.opportunity_received_at || 0).getTime();
+      return dateB - dateA;
+    } else if (sortBy === "oldest") {
+      const dateA = new Date(a.opportunity_received_at || 0).getTime();
+      const dateB = new Date(b.opportunity_received_at || 0).getTime();
+      return dateA - dateB;
+    } else if (sortBy === "applied_asc") {
+      return (a.application_count ?? 0) - (b.application_count ?? 0);
+    } else if (sortBy === "applied_desc") {
+      return (b.application_count ?? 0) - (a.application_count ?? 0);
+    } else if (sortBy === "shortlisted_asc") {
+      return (a.shortlisted_count ?? 0) - (b.shortlisted_count ?? 0);
+    } else if (sortBy === "shortlisted_desc") {
+      return (b.shortlisted_count ?? 0) - (a.shortlisted_count ?? 0);
+    } else if (sortBy === "response_asc") {
+      return (a.response_count ?? 0) - (b.response_count ?? 0);
+    } else if (sortBy === "response_desc") {
+      return (b.response_count ?? 0) - (a.response_count ?? 0);
+    }
+    return 0;
+  });
 
   return (
     <main className="dashboard-shell">
@@ -749,11 +793,42 @@ function AdminDashboard({ adminToken, onLogout }) {
                 <div className="panel-title">
                   <BriefcaseBusiness size={20} />
                   <h2>Opportunities</h2>
-                  {recentOpportunities.length ? <span className="title-count">{recentOpportunities.length}</span> : null}
+                  {recentOpportunities.length ? <span className="title-count">{sortedOpportunities.length}</span> : null}
                 </div>
+
+                {recentOpportunities.length > 0 && (
+                  <div className="opportunities-controls">
+                    <div className="search-field">
+                      <input
+                        type="text"
+                        placeholder="Search by company name..."
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="search-input"
+                      />
+                    </div>
+
+                    <div className="controls-row">
+                      <div className="sort-controls">
+                        <label>Sort by:</label>
+                        <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="sort-select">
+                          <option value="recent">Recent First</option>
+                          <option value="oldest">Oldest First</option>
+                          <option value="applied_desc">Most Applied</option>
+                          <option value="applied_asc">Least Applied</option>
+                          <option value="shortlisted_desc">Most Shortlisted</option>
+                          <option value="shortlisted_asc">Least Shortlisted</option>
+                          <option value="response_desc">Most Responses</option>
+                          <option value="response_asc">Least Responses</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {loading ? (
                   <PanelLoader />
-                ) : recentOpportunities.length ? (
+                ) : sortedOpportunities.length ? (
                   <div className="admin-table opportunities-table scrollable">
                     <div className="admin-head">
                       <span>Company</span>
@@ -761,7 +836,7 @@ function AdminDashboard({ adminToken, onLogout }) {
                       <span>Counts</span>
                       <span>Received</span>
                     </div>
-                    {recentOpportunities.map((opportunity) => (
+                    {sortedOpportunities.map((opportunity) => (
                       <div className="admin-row" key={opportunity.id}>
                         <div>
                           <button
@@ -789,7 +864,7 @@ function AdminDashboard({ adminToken, onLogout }) {
                     ))}
                   </div>
                 ) : (
-                  <div className="empty-state compact"><p>No opportunities found.</p></div>
+                  <div className="empty-state compact"><p>{searchTerm ? "No opportunities match your search." : "No opportunities found."}</p></div>
                 )}
               </div>
             </section>
@@ -955,9 +1030,24 @@ function DetailGroup({ title, fields }) {
 }
 
 function OpportunityDetail({ detail }) {
+  const [searchStudent, setSearchStudent] = useState("");
+  const [filterStatus, setFilterStatus] = useState("all");
+
   const o = detail.opportunity || {};
   const stats = detail.stats || {};
   const applicants = detail.applicants || [];
+
+  // Filter applicants
+  const filteredApplicants = applicants.filter((applicant) => {
+    const student = applicant.student || {};
+    const searchLower = searchStudent.toLowerCase();
+    const matchesSearch =
+      (student.name || "").toLowerCase().includes(searchLower) ||
+      (student.phone || "").includes(searchStudent) ||
+      (student.email || "").toLowerCase().includes(searchLower);
+    const matchesStatus = filterStatus === "all" || (applicant.status || "applied") === filterStatus;
+    return matchesSearch && matchesStatus;
+  });
 
   const keyFacts = [
     ["Role", o.role],
@@ -1046,9 +1136,8 @@ function OpportunityDetail({ detail }) {
           {links.length ? (
             <div className="detail-links">
               {links.map(([label, href]) => (
-                <a key={label} href={href} target="_blank" rel="noreferrer">
-                  <ExternalLink size={14} />
-                  {label}
+                <a key={label} href={href} target="_blank" rel="noreferrer" title={label} className="icon-link">
+                  {getLinkIcon(label)}
                 </a>
               ))}
             </div>
@@ -1059,9 +1148,41 @@ function OpportunityDetail({ detail }) {
           <div className="panel-title">
             <UsersRound size={20} />
             <h2>Applicants</h2>
-            <span className="title-count">{applicants.length}</span>
+            <span className="title-count">{filteredApplicants.length}</span>
           </div>
-          {applicants.length ? (
+
+          {applicants.length > 0 && (
+            <div className="applicants-controls">
+              <div className="search-field">
+                <input
+                  type="text"
+                  placeholder="Search by student name, phone, or email..."
+                  value={searchStudent}
+                  onChange={(e) => setSearchStudent(e.target.value)}
+                  className="search-input"
+                />
+              </div>
+
+              <div className="controls-row">
+                <div className="filter-controls">
+                  <label>Filter by status:</label>
+                  <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="sort-select">
+                    <option value="all">All Status</option>
+                    <option value="applied">Applied</option>
+                    <option value="shortlisted">Shortlisted</option>
+                    <option value="rejected">Rejected</option>
+                    <option value="hired">Hired</option>
+                    <option value="dropped">Dropped</option>
+                    <option value="interview_scheduled">Interview Scheduled</option>
+                    <option value="in_progress">In Progress</option>
+                    <option value="not_interested">Not Interested</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {filteredApplicants.length ? (
             <div className="admin-table applicants-table">
               <div className="admin-head">
                 <span>Student</span>
@@ -1069,12 +1190,12 @@ function OpportunityDetail({ detail }) {
                 <span>Applied</span>
                 <span>Links</span>
               </div>
-              {applicants.map((applicant) => (
+              {filteredApplicants.map((applicant) => (
                 <ApplicantRow key={applicant.id} application={applicant} />
               ))}
             </div>
           ) : (
-            <div className="empty-state compact"><p>No applicants yet.</p></div>
+            <div className="empty-state compact"><p>{searchStudent ? "No applicants match your search." : "No applicants yet."}</p></div>
           )}
         </div>
       </section>
@@ -1105,9 +1226,8 @@ function ApplicantRow({ application }) {
       <div className="link-group">
         {links.length ? (
           links.map(([label, href]) => (
-            <a key={label} href={href} target="_blank" rel="noreferrer" title={label}>
-              <ExternalLink size={14} />
-              {label}
+            <a key={label} href={href} target="_blank" rel="noreferrer" title={label} className="icon-link">
+              {getLinkIcon(label)}
             </a>
           ))
         ) : (
@@ -1134,6 +1254,8 @@ function listForMode(student, mode) {
 function AdminStudentsView({ students, loading }) {
   const [expanded, setExpanded] = useState(null);
   const [showAll, setShowAll] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [sortBy, setSortBy] = useState("name");
 
   if (loading) return <PanelLoader />;
 
@@ -1158,14 +1280,74 @@ function AdminStudentsView({ students, loading }) {
     );
   }
 
+  // Filter students based on search
+  const filteredStudents = students.filter((student) => {
+    const searchLower = searchTerm.toLowerCase();
+    return (
+      (student.name || "").toLowerCase().includes(searchLower) ||
+      (student.phone || "").includes(searchTerm) ||
+      (student.email || "").toLowerCase().includes(searchLower)
+    );
+  });
+
+  // Sort students
+  const sortedStudents = [...filteredStudents].sort((a, b) => {
+    if (sortBy === "name") {
+      return (a.name || "").localeCompare(b.name || "");
+    } else if (sortBy === "applied_asc") {
+      return (a.application_count ?? 0) - (b.application_count ?? 0);
+    } else if (sortBy === "applied_desc") {
+      return (b.application_count ?? 0) - (a.application_count ?? 0);
+    } else if (sortBy === "shortlisted_asc") {
+      return (a.shortlisted_count ?? 0) - (b.shortlisted_count ?? 0);
+    } else if (sortBy === "shortlisted_desc") {
+      return (b.shortlisted_count ?? 0) - (a.shortlisted_count ?? 0);
+    } else if (sortBy === "not_shortlisted_asc") {
+      return (a.not_shortlisted_count ?? 0) - (b.not_shortlisted_count ?? 0);
+    } else if (sortBy === "not_shortlisted_desc") {
+      return (b.not_shortlisted_count ?? 0) - (a.not_shortlisted_count ?? 0);
+    }
+    return 0;
+  });
+
   return (
     <section className="panel wide">
       <div className="panel-title">
         <UsersRound size={20} />
         <h2>All Students</h2>
-        {students.length ? <span className="title-count">{students.length}</span> : null}
+        {students.length ? <span className="title-count">{sortedStudents.length}</span> : null}
       </div>
-      {students.length ? (
+
+      {students.length > 0 && (
+        <div className="students-controls">
+          <div className="search-field">
+            <input
+              type="text"
+              placeholder="Search by name, phone, or email..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="search-input"
+            />
+          </div>
+
+          <div className="controls-row">
+            <div className="sort-controls">
+              <label>Sort by:</label>
+              <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="sort-select">
+                <option value="name">Name (A-Z)</option>
+                <option value="applied_desc">Most Applied</option>
+                <option value="applied_asc">Least Applied</option>
+                <option value="shortlisted_desc">Most Shortlisted</option>
+                <option value="shortlisted_asc">Least Shortlisted</option>
+                <option value="not_shortlisted_desc">Most Not Shortlisted</option>
+                <option value="not_shortlisted_asc">Least Not Shortlisted</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {sortedStudents.length ? (
         <div className="admin-table students-table">
           <div className="admin-head">
             <span>Student</span>
@@ -1173,7 +1355,7 @@ function AdminStudentsView({ students, loading }) {
             <span>Shortlisted</span>
             <span>Not Shortlisted</span>
           </div>
-          {students.map((student) => {
+          {sortedStudents.map((student) => {
             const isOpen = expanded && expanded.id === student.id;
             const list = isOpen ? listForMode(student, expanded.mode) : [];
             const visible = showAll ? list : list.slice(0, EXPAND_PREVIEW);
@@ -1220,7 +1402,7 @@ function AdminStudentsView({ students, loading }) {
           })}
         </div>
       ) : (
-        <div className="empty-state compact"><p>No students found.</p></div>
+        <div className="empty-state compact"><p>{searchTerm ? "No students match your search." : "No students found."}</p></div>
       )}
     </section>
   );
@@ -1249,9 +1431,8 @@ function ExpandCompanyRow({ application }) {
       <div className="link-group">
         {links.length ? (
           links.map(([label, href]) => (
-            <a key={label} href={href} target="_blank" rel="noreferrer" title={label}>
-              <ExternalLink size={14} />
-              {label}
+            <a key={label} href={href} target="_blank" rel="noreferrer" title={label} className="icon-link">
+              {getLinkIcon(label)}
             </a>
           ))
         ) : (

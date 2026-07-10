@@ -551,6 +551,15 @@ input:focus {
   min-width: 0;
 }
 
+.applications-row .link-group {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-start;
+}
+
 .date-line {
   display: inline-flex;
   align-items: center;
@@ -559,22 +568,31 @@ input:focus {
 
 .link-group {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-start;
 }
 
-.link-group a {
-  min-height: 30px;
+.icon-link {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 0 8px;
-  border: 1px solid #cbd3dc;
-  border-radius: 6px;
+  justify-content: center;
+  gap: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
   color: #0f766e;
   text-decoration: none;
-  font-size: 12px;
-  font-weight: 800;
+  cursor: pointer;
+  transition: color 0.2s ease, transform 0.1s ease;
+  flex-shrink: 0;
+}
+
+.icon-link:hover {
+  color: #065f57;
+  transform: scale(1.1);
 }
 
 .admin-grid {
@@ -944,6 +962,27 @@ input:focus {
   grid-template-columns: 1.5fr 0.9fr 0.9fr 1.1fr;
 }
 
+.applicants-table .admin-row .link-group {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.filter-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.filter-controls label {
+  font-size: 13px;
+  font-weight: 700;
+  color: #4b5563;
+}
+
 .detail-note {
   margin-top: 14px;
   padding: 12px 14px;
@@ -989,27 +1028,34 @@ input:focus {
 
 .detail-links {
   display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
+  flex-direction: row;
+  gap: 12px;
   margin-top: 16px;
+  align-items: center;
 }
 
 .detail-links a {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 7px 12px;
-  border: 1px solid #d7dee6;
-  border-radius: 8px;
-  background: #fff;
+  justify-content: center;
+  gap: 0;
+  padding: 0;
+  min-width: auto;
+  min-height: auto;
+  border: none;
+  background: transparent;
   color: #0f766e;
   font-size: 13px;
   font-weight: 700;
   text-decoration: none;
+  cursor: pointer;
+  transition: color 0.2s ease, transform 0.1s ease;
 }
 
 .detail-links a:hover {
-  background: #f3f6f9;
+  color: #065f57;
+  transform: scale(1.15);
+  background: transparent;
 }
 
 @media (max-width: 720px) {
@@ -1053,6 +1099,84 @@ input:focus {
   display: grid;
   gap: 5px;
   min-width: 0;
+}
+
+/* Opportunities & Students controls */
+.opportunities-controls,
+.students-controls,
+.applicants-controls {
+  display: grid;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid #e5eaf0;
+  margin-bottom: 12px;
+}
+
+.search-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.search-input {
+  flex: 1;
+  max-width: 500px;
+  padding: 8px 12px;
+  border: 1px solid #d7dee6;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 14px;
+  color: #202124;
+}
+
+.search-input::placeholder {
+  color: #94a3b8;
+}
+
+.search-input:focus {
+  outline: none;
+  border-color: #0f766e;
+  box-shadow: 0 0 0 2px rgba(15, 118, 110, 0.1);
+}
+
+.controls-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: center;
+}
+
+.sort-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sort-controls label {
+  font-size: 13px;
+  font-weight: 700;
+  color: #4b5563;
+}
+
+.sort-select {
+  padding: 7px 10px;
+  border: 1px solid #d7dee6;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 13px;
+  color: #202124;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.sort-select:hover {
+  border-color: #bfe5d1;
+}
+
+.sort-select:focus {
+  outline: none;
+  border-color: #0f766e;
+  box-shadow: 0 0 0 2px rgba(15, 118, 110, 0.1);
 }
 
 @media (max-width: 900px) {
@@ -1126,5 +1250,39 @@ input:focus {
   .admin-row,
   .opportunities-table .admin-row {
     grid-template-columns: 1fr;
+  }
+
+  .opportunities-controls,
+  .students-controls {
+    gap: 8px;
+  }
+
+  .search-input {
+    max-width: 100%;
+  }
+
+  .controls-row {
+    gap: 8px;
+    flex-direction: column;
+  }
+
+  .sort-controls {
+    width: 100%;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .sort-select {
+    width: 100%;
+  }
+
+  .applicants-controls {
+    gap: 8px;
+  }
+
+  .filter-controls {
+    width: 100%;
+    flex-direction: column;
+    align-items: flex-start;
   }
 }
