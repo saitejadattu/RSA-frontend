@@ -26,6 +26,16 @@ import {
   UsersRound,
   XCircle,
   Code,
+  ChevronDown,
+  ChevronRight,
+  CircleHelp,
+  Lightbulb,
+  MessageSquareQuote,
+  Mic,
+  Send,
+  Sparkles,
+  TriangleAlert,
+  Wand2,
 } from "lucide-react";
 import "./styles.css";
 
@@ -414,10 +424,358 @@ function StatusMessage({ error, message }) {
   );
 }
 
+/* --- What a student sees of their own RSA report ------------------- */
+function StudentReportCard({ report, defaultOpen = false }) {
+  const [open, setOpen] = useState(defaultOpen);
+  const overall = report.overall || {};
+  const skills = Object.entries(report.skill_ratings || {});
+
+  return (
+    <div className="rsa-report" id={`report-${report.id}`}>
+      <div className="rsa-report-head">
+        <button type="button" className="rsa-expand" onClick={() => setOpen((value) => !value)}>
+          {open ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
+          <div>
+            <strong>{report.company?.name || "Company"}</strong>
+            <span>
+              {report.opportunity?.role || "Role"}
+              {report.generated_at ? ` · ${formatDate(report.generated_at)}` : ""}
+            </span>
+          </div>
+        </button>
+        {/* No score or verdict here by design: a student gets coaching, not a
+            hiring decision. Admins still see both. */}
+        <span className="rsa-review-tag">
+          <Sparkles size={13} /> Reviewed
+        </span>
+      </div>
+
+      {open ? (
+        <div className="rsa-report-body">
+          {overall.summary ? <p className="rsa-summary">{overall.summary}</p> : null}
+
+          {report.interviewer_feedback ? (
+            <div className="rsa-quote">
+              <MessageSquareQuote size={16} />
+              <div>
+                <strong>What the interviewer told you</strong>
+                <p>{report.interviewer_feedback}</p>
+              </div>
+            </div>
+          ) : null}
+
+          <div className="rsa-cols">
+            <div>
+              <h4><CheckCircle2 size={15} /> What went well</h4>
+              {report.strengths?.length ? (
+                <ul>{report.strengths.map((item) => <li key={item}>{item}</li>)}</ul>
+              ) : (
+                <p className="muted">Nothing recorded.</p>
+              )}
+            </div>
+            <div>
+              <h4><Lightbulb size={15} /> Where to improve</h4>
+              {report.improvements?.length ? (
+                <ul>
+                  {report.improvements.map((imp, index) => (
+                    <li key={index}>
+                      <span className={`rsa-prio ${imp.priority}`}>{imp.priority}</span>
+                      <strong>{imp.area}</strong> — {imp.detail}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="muted">Nothing recorded.</p>
+              )}
+            </div>
+          </div>
+
+          {skills.length ? (
+            <>
+              <h4><BarChart3 size={15} /> Skills you showed</h4>
+              <div className="rsa-skills">
+                {skills.map(([skill, rating]) => (
+                  <div className="rsa-skill" key={skill}>
+                    <span>{skill}</span>
+                    <div className="rsa-bar"><i style={{ width: `${((rating || 0) / 5) * 100}%` }} /></div>
+                    <b>{rating ?? "–"}/5</b>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : null}
+
+          <h4><CircleHelp size={15} /> Every question you were asked</h4>
+          <div className="rsa-answers">
+            {(report.answers || []).map((answer, index) => (
+              <div className="rsa-answer" key={index}>
+                <div className="rsa-answer-head">
+                  <strong>{answer.question_text}</strong>
+                  <span className={`status-pill ${correctnessClass(answer.correctness)}`}>
+                    {(answer.correctness || "").replaceAll("_", " ")}
+                  </span>
+                  <span className="rsa-acc">{answer.accuracy ?? 0}%</span>
+                </div>
+                {answer.student_answer ? <p><em>You said:</em> {answer.student_answer}</p> : null}
+                {answer.feedback ? <p><em>Feedback:</em> {answer.feedback}</p> : null}
+                {answer.ideal_answer ? (
+                  <p className="rsa-ideal"><em>A better answer:</em> {answer.ideal_answer}</p>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/* --- Practice bank: real questions asked at real companies ---------- */
+function PracticeQuestionCard({ question }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="rsa-practice">
+      <button type="button" className="rsa-practice-head" onClick={() => setOpen((value) => !value)}>
+        {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+        <div className="rsa-practice-q">
+          <strong>{question.question_text}</strong>
+          <div className="rsa-practice-meta">
+            {question.question_type === "scenario" ? <span className="rsa-cat scenario">scenario</span> : null}
+            {question.difficulty ? <span className="mini-count">{question.difficulty}</span> : null}
+            {question.times_asked > 1 ? (
+              <span className="mini-count good">asked {question.times_asked}×</span>
+            ) : null}
+            {question.companies?.length ? (
+              <span className="rsa-companies">at {question.companies.filter(Boolean).join(", ")}</span>
+            ) : null}
+          </div>
+        </div>
+      </button>
+      {open ? (
+        <div className="rsa-practice-body">
+          {question.why_asked ? (
+            <div className="rsa-why">
+              <h4><CircleHelp size={15} /> Why they ask this</h4>
+              <p>{question.why_asked}</p>
+            </div>
+          ) : null}
+
+          {question.prepare?.length ? (
+            <div className="rsa-prep">
+              <h4><BookOpenCheck size={15} /> What to prepare</h4>
+              <div className="rsa-prep-list">
+                {question.prepare.map((item) => (
+                  <span className="rsa-prep-chip" key={item}>{item}</span>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {question.model_answer ? (
+            <div>
+              <h4><Lightbulb size={15} /> Model answer</h4>
+              <p>{question.model_answer}</p>
+            </div>
+          ) : null}
+
+          {!question.why_asked && !question.prepare?.length && !question.model_answer ? (
+            <p className="muted">No guidance available for this question yet.</p>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function PracticeBank({ token }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [includeScenario, setIncludeScenario] = useState(false);
+  const [category, setCategory] = useState("");
+  const [difficulty, setDifficulty] = useState("");
+  const [search, setSearch] = useState("");
+
+  useEffect(() => {
+    let live = true;
+    setLoading(true);
+    const params = new URLSearchParams();
+    if (includeScenario) params.set("include_scenario", "true");
+    if (category) params.set("category", category);
+    if (difficulty) params.set("difficulty", difficulty);
+    if (search.trim()) params.set("search", search.trim());
+    apiRequest(`/students/me/practice-questions?${params.toString()}`, { token })
+      .then((result) => live && setData(result))
+      .catch((err) => live && setError(err.message))
+      .finally(() => live && setLoading(false));
+    return () => {
+      live = false;
+    };
+  }, [token, includeScenario, category, difficulty, search]);
+
+  const questions = data?.questions || [];
+
+  // Company Focus: the topics these questions actually cover, so it can never
+  // disagree with the list shown underneath it.
+  const focus = useMemo(() => {
+    const seen = [];
+    questions.forEach((question) => {
+      [question.category, question.topic].forEach((value) => {
+        const label = (value || "").trim();
+        if (label && !seen.includes(label)) seen.push(label);
+      });
+    });
+    return seen.slice(0, 10);
+  }, [questions]);
+
+  return (
+    <>
+      <p className="rsa-hint">
+        Real questions asked in interviews across companies. Use them to prepare — the more often a
+        question shows up, the more likely you'll be asked it.
+      </p>
+
+      <div className="rsa-filters">
+        <input
+          className="search-input"
+          placeholder="Search questions…"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+        />
+        <select className="sort-select" value={category} onChange={(event) => setCategory(event.target.value)}>
+          <option value="">All topics</option>
+          {(data?.categories || []).map((item) => (
+            <option key={item} value={item}>{item}</option>
+          ))}
+        </select>
+        <select className="sort-select" value={difficulty} onChange={(event) => setDifficulty(event.target.value)}>
+          <option value="">Any difficulty</option>
+          <option value="easy">Easy</option>
+          <option value="medium">Medium</option>
+          <option value="hard">Hard</option>
+        </select>
+        <label className="rsa-toggle">
+          <input
+            type="checkbox"
+            checked={includeScenario}
+            onChange={(event) => setIncludeScenario(event.target.checked)}
+          />
+          <span>
+            Include scenario-based
+            {data?.scenario_available ? ` (${data.scenario_available})` : ""}
+          </span>
+        </label>
+      </div>
+
+      {error ? <StatusMessage error={error} /> : null}
+      {loading ? <PanelLoader /> : null}
+
+      {!loading && !questions.length ? (
+        <div className="empty-state compact">
+          <p>
+            {search || category || difficulty
+              ? "No questions match these filters."
+              : "No practice questions yet. They appear here as interviews get analysed."}
+          </p>
+        </div>
+      ) : null}
+
+      {!loading && questions.length ? (
+        <>
+          {focus.length ? (
+            <div className="rsa-focus">
+              <strong>What these companies focus on</strong>
+              <div className="rsa-focus-list">
+                {focus.map((item) => (
+                  <span className="rsa-focus-chip" key={item}>{item}</span>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          <p className="muted" style={{ marginBottom: 10 }}>
+            Showing {questions.length} question{questions.length === 1 ? "" : "s"}
+            {!includeScenario && data?.scenario_available
+              ? ` · ${data.scenario_available} scenario question${data.scenario_available === 1 ? "" : "s"} hidden`
+              : ""}
+          </p>
+
+          {/* Grouped by topic so a student revises one area at a time. */}
+          {(data?.groups || []).map((group) => (
+            <div className="rsa-group" key={group.category}>
+              <div className="rsa-group-head">
+                <span className="rsa-cat tech">{group.category}</span>
+                <span className="muted">{group.count} question{group.count === 1 ? "" : "s"}</span>
+              </div>
+              <div className="rsa-practices">
+                {group.questions.map((question) => (
+                  <PracticeQuestionCard key={question.question_key} question={question} />
+                ))}
+              </div>
+            </div>
+          ))}
+        </>
+      ) : null}
+    </>
+  );
+}
+
+function StudentReportsView({ reports, loading, focusId, token }) {
+  const [tab, setTab] = useState("feedback");
+
+  return (
+    <section className="panel wide">
+      <div className="panel-title">
+        <FileText size={20} />
+        <h2>Interview Feedback</h2>
+      </div>
+
+      <div className="rsa-tabs">
+        <button type="button" className={tab === "feedback" ? "active" : ""} onClick={() => setTab("feedback")}>
+          My feedback ({reports.length})
+        </button>
+        <button type="button" className={tab === "practice" ? "active" : ""} onClick={() => setTab("practice")}>
+          Practice questions
+        </button>
+      </div>
+
+      {tab === "feedback" ? (
+        loading ? (
+          <PanelLoader />
+        ) : reports.length ? (
+          <>
+            <p className="rsa-hint">
+              Detailed feedback from your interviews, including what to improve before the next one.
+            </p>
+            <div className="rsa-reports">
+              {reports.map((report) => (
+                <StudentReportCard key={report.id} report={report} defaultOpen={report.id === focusId} />
+              ))}
+            </div>
+          </>
+        ) : (
+          <div className="empty-state">
+            <p>
+              No feedback published yet. After an interview, your feedback appears here once the
+              placement team has reviewed it.
+            </p>
+          </div>
+        )
+      ) : (
+        <PracticeBank token={token} />
+      )}
+    </section>
+  );
+}
+
 function StudentDashboard({ student, token, onLogout }) {
   const [dashboard, setDashboard] = useState(null);
   const [dashboardError, setDashboardError] = useState("");
   const [loadingDashboard, setLoadingDashboard] = useState(true);
+  const [view, setView] = useState("dashboard");
+  const [reports, setReports] = useState([]);
+  const [loadingReports, setLoadingReports] = useState(true);
+  const [focusReportId, setFocusReportId] = useState(null);
 
   useEffect(() => {
     let isCurrent = true;
@@ -438,6 +796,38 @@ function StudentDashboard({ student, token, onLogout }) {
       isCurrent = false;
     };
   }, [token]);
+
+  // Published reports drive both the Feedback column and the reports view.
+  useEffect(() => {
+    let isCurrent = true;
+    setLoadingReports(true);
+    apiRequest("/students/me/reports", { token })
+      .then((data) => {
+        if (isCurrent) setReports(data || []);
+      })
+      .catch(() => {
+        if (isCurrent) setReports([]);
+      })
+      .finally(() => {
+        if (isCurrent) setLoadingReports(false);
+      });
+    return () => {
+      isCurrent = false;
+    };
+  }, [token]);
+
+  const reportByApplication = useMemo(() => {
+    const map = {};
+    reports.forEach((report) => {
+      if (report.application_id) map[report.application_id] = report;
+    });
+    return map;
+  }, [reports]);
+
+  function openReport(reportId) {
+    setFocusReportId(reportId);
+    setView("reports");
+  }
 
   const initials = useMemo(() => {
     return student.name
@@ -467,10 +857,24 @@ function StudentDashboard({ student, token, onLogout }) {
           <span>RSA</span>
         </div>
         <nav>
-          <a className="active"><BarChart3 size={18} /> Dashboard</a>
-          <a><FileText size={18} /> Interview Reports</a>
-          <a><BookOpenCheck size={18} /> Practice Bank</a>
-          <a><BriefcaseBusiness size={18} /> Projects</a>
+          <button
+            type="button"
+            className={view === "dashboard" ? "active" : ""}
+            onClick={() => setView("dashboard")}
+          >
+            <BarChart3 size={18} /> Dashboard
+          </button>
+          <button
+            type="button"
+            className={view === "reports" ? "active" : ""}
+            onClick={() => {
+              setFocusReportId(null);
+              setView("reports");
+            }}
+          >
+            <FileText size={18} /> Interview Feedback
+            {reports.length ? <span className="nav-count">{reports.length}</span> : null}
+          </button>
         </nav>
         <button className="ghost-button" onClick={onLogout}>
           <LogOut size={18} />
@@ -487,11 +891,25 @@ function StudentDashboard({ student, token, onLogout }) {
           <div className="avatar" aria-label={student.name}>{initials}</div>
         </header>
 
+        {view === "reports" ? (
+          <StudentReportsView
+            reports={reports}
+            loading={loadingReports}
+            focusId={focusReportId}
+            token={token}
+          />
+        ) : (
+        <>
         <section className="stats-grid">
           <Metric icon={<BriefcaseBusiness size={20} />} label="Applications" value={summary.total_applications ?? 0} />
           <Metric icon={<BadgeCheck size={20} />} label="Shortlisted" value={summary.shortlisted_count ?? 0} />
           <Metric icon={<XCircle size={20} />} label="Rejected" value={summary.rejected_count ?? 0} />
-          <Metric icon={<Trophy size={20} />} label="Hired" value={summary.hired_count ?? 0} />
+          <Metric
+            icon={<FileText size={20} />}
+            label="Feedback"
+            value={reports.length}
+            onClick={reports.length ? () => setView("reports") : undefined}
+          />
         </section>
 
         {dashboardError ? <StatusMessage error={dashboardError} /> : null}
@@ -540,15 +958,21 @@ function StudentDashboard({ student, token, onLogout }) {
             {loadingDashboard ? (
               <PanelLoader />
             ) : applications.length ? (
-              <div className="applications-table">
+              <div className="applications-table with-feedback">
                 <div className="applications-head">
                   <span>Company</span>
                   <span>Role</span>
                   <span>Status</span>
                   <span>Links</span>
+                  <span>Feedback</span>
                 </div>
                 {applications.map((application) => (
-                  <ApplicationRow key={application.id} application={application} />
+                  <ApplicationRow
+                    key={application.id}
+                    application={application}
+                    report={reportByApplication[application.id]}
+                    onOpenReport={openReport}
+                  />
                 ))}
               </div>
             ) : (
@@ -558,6 +982,8 @@ function StudentDashboard({ student, token, onLogout }) {
             )}
           </div>
         </section>
+        </>
+        )}
       </section>
     </main>
   );
@@ -609,7 +1035,7 @@ function ApplicationMini({ application }) {
   );
 }
 
-function ApplicationRow({ application }) {
+function ApplicationRow({ application, report, onOpenReport }) {
   const links = [
     ["Resume", application.resume_link],
     ["Project", application.project_link],
@@ -644,6 +1070,19 @@ function ApplicationRow({ application }) {
           <span className="muted">No links</span>
         )}
       </div>
+      {onOpenReport ? (
+        <div>
+          {report ? (
+            <button type="button" className="rsa-feedback-btn" onClick={() => onOpenReport(report.id)}>
+              <FileText size={15} />
+              View feedback
+              <span className="rsa-mini-score">{report.overall?.score ?? "–"}/10</span>
+            </button>
+          ) : (
+            <span className="muted">—</span>
+          )}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -967,7 +1406,11 @@ function CompanyDetailView({ adminToken, companyId, onBack }) {
                   <ArrowLeft size={16} /> Other opportunities ({data.opportunity_count})
                 </button>
               ) : null}
-              {loadingOpp || !oppData ? <PanelLoader /> : <OpportunityDetail detail={oppData} />}
+              {loadingOpp || !oppData ? (
+                <PanelLoader />
+              ) : (
+                <OpportunityDetail detail={oppData} adminToken={adminToken} opportunityId={selectedOppId} />
+              )}
             </>
           ) : null}
         </>
@@ -1029,7 +1472,578 @@ function DetailGroup({ title, fields }) {
   );
 }
 
-function OpportunityDetail({ detail }) {
+/* ------------------------------------------------------------------ *
+ *  RSA interview reports: transcript -> proposal -> analysis -> publish
+ * ------------------------------------------------------------------ */
+
+const rsaApi = {
+  propose: (adminToken, rawText, opportunityId) =>
+    apiRequest("/interview-sessions/transcript/propose", {
+      method: "POST",
+      adminToken,
+      body: { raw_text: rawText, opportunity_id: opportunityId },
+    }),
+  confirm: (adminToken, body) =>
+    apiRequest("/interview-sessions/transcript/confirm", { method: "POST", adminToken, body }),
+  analyze: (adminToken, sessionId) =>
+    apiRequest(`/interview-sessions/${sessionId}/analyze`, { method: "POST", adminToken }),
+  reports: (adminToken, sessionId) =>
+    apiRequest(`/interview-sessions/${sessionId}/reports`, { adminToken }),
+  setVisibility: (adminToken, reportId, visible) =>
+    apiRequest(`/admin/reports/${reportId}/visibility`, {
+      method: "PATCH",
+      adminToken,
+      body: { visible_to_student: visible },
+    }),
+  questions: (adminToken, opportunityId) =>
+    apiRequest(`/admin/questions?opportunity_id=${opportunityId}&technical_only=false`, { adminToken }),
+  sessions: (adminToken, opportunityId) =>
+    apiRequest(`/interview-sessions/?opportunity_id=${opportunityId}`, { adminToken }),
+};
+
+const IGNORE = "__ignore__";
+const INTERVIEWER = "__interviewer__";
+
+function verdictClass(verdict) {
+  if (verdict === "strong") return "good";
+  if (verdict === "weak") return "bad";
+  return "warn";
+}
+
+function correctnessClass(value) {
+  if (value === "correct") return "good";
+  if (value === "incorrect" || value === "not_answered") return "bad";
+  return "warn";
+}
+
+/* --- Step 1: paste the transcript --------------------------------- */
+function TranscriptUpload({ onPropose, busy }) {
+  const [text, setText] = useState("");
+  return (
+    <div className="rsa-upload">
+      <p className="rsa-hint">
+        Paste the full Google Meet transcript, including the date and title lines at the top.
+        Nothing is saved until you review and confirm the next screen.
+      </p>
+      <textarea
+        className="rsa-textarea"
+        value={text}
+        onChange={(event) => setText(event.target.value)}
+        placeholder={"Jun 26, 2026\nInterviews | Nxtwave X WeSee  - Transcript\n00:00:00\n\nInterviewer: ...\nStudent: ..."}
+        spellCheck={false}
+      />
+      <div className="rsa-actions">
+        <span className="muted">{text.trim() ? `${text.trim().split(/\s+/).length} words` : "Empty"}</span>
+        <button className="primary-button" type="button" disabled={!text.trim() || busy} onClick={() => onPropose(text)}>
+          {busy ? <Loader2 className="spin" size={18} /> : <Wand2 size={18} />}
+          Read transcript
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* --- Step 2: review what we detected ------------------------------ */
+function ProposalReview({ proposal, shortlist, onBack, onConfirm, busy }) {
+  const [choices, setChoices] = useState(() => {
+    const initial = {};
+    (proposal.speaker_map || []).forEach((entry) => {
+      if (entry.role === "student" && entry.student_id) initial[entry.speaker_label] = entry.student_id;
+      else if (entry.role === "interviewer") initial[entry.speaker_label] = INTERVIEWER;
+      else initial[entry.speaker_label] = IGNORE;
+    });
+    return initial;
+  });
+
+  const confidenceBy = useMemo(() => {
+    const map = {};
+    (proposal.speaker_map || []).forEach((entry) => {
+      map[entry.speaker_label] = entry.confidence;
+    });
+    return map;
+  }, [proposal]);
+
+  const blockBy = useMemo(() => {
+    const map = {};
+    (proposal.blocks || []).forEach((block) => {
+      map[block.speaker_label] = block;
+    });
+    return map;
+  }, [proposal]);
+
+  const studentCount = Object.values(choices).filter((v) => v !== IGNORE && v !== INTERVIEWER).length;
+
+  function buildSpeakerMap() {
+    return Object.entries(choices).map(([speaker_label, value]) => {
+      if (value === INTERVIEWER) return { speaker_label, student_id: null, role: "interviewer" };
+      if (value === IGNORE) return { speaker_label, student_id: null, role: "unknown" };
+      return { speaker_label, student_id: value, role: "student" };
+    });
+  }
+
+  return (
+    <div className="rsa-review">
+      <div className="rsa-detected">
+        <div>
+          <span>Meeting date</span>
+          <strong>{proposal.header?.meeting_date ? formatDate(proposal.header.meeting_date) : "Not detected"}</strong>
+        </div>
+        <div>
+          <span>Interviewer</span>
+          <strong>{proposal.interviewer || "Not detected"}</strong>
+        </div>
+        <div>
+          <span>Candidates found</span>
+          <strong>{(proposal.blocks || []).length}</strong>
+        </div>
+        <div>
+          <span>Transcript lines</span>
+          <strong>{proposal.segment_count}</strong>
+        </div>
+      </div>
+
+      {(proposal.warnings || []).length ? (
+        <div className="rsa-warnings">
+          {proposal.warnings.map((warning) => (
+            <div key={warning} className="rsa-warning">
+              <TriangleAlert size={16} />
+              <span>{warning}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      <h3 className="detail-subhead">Who is who</h3>
+      <p className="rsa-hint">
+        We matched each speaker to a shortlisted student. Check the low-confidence ones before continuing.
+      </p>
+      <div className="rsa-map">
+        {Object.keys(choices).map((speaker) => {
+          const confidence = confidenceBy[speaker];
+          const block = blockBy[speaker];
+          const isStudent = choices[speaker] !== IGNORE && choices[speaker] !== INTERVIEWER;
+          return (
+            <div className="rsa-map-row" key={speaker}>
+              <div className="rsa-speaker">
+                <strong>{speaker}</strong>
+                <span>
+                  {block ? `${block.segment_count} turns` : "no block"}
+                  {isStudent && confidence ? ` · match ${Math.round(confidence * 100)}%` : ""}
+                </span>
+              </div>
+              <select
+                className="sort-select"
+                value={choices[speaker]}
+                onChange={(event) => setChoices((prev) => ({ ...prev, [speaker]: event.target.value }))}
+              >
+                <option value={IGNORE}>Ignore this speaker</option>
+                <option value={INTERVIEWER}>Interviewer</option>
+                {shortlist.map((student) => (
+                  <option key={student.student_id} value={student.student_id}>
+                    {student.name}
+                  </option>
+                ))}
+              </select>
+              {isStudent && confidence !== undefined && confidence < 0.8 ? (
+                <span className="status-pill warn">verify</span>
+              ) : (
+                <span />
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {(proposal.missing_students || []).length ? (
+        <div className="rsa-noshow">
+          <strong>Shortlisted but never spoke:</strong>{" "}
+          {proposal.missing_students.map((student) => student.name).join(", ")}
+        </div>
+      ) : null}
+
+      <div className="rsa-actions">
+        <button className="back-button" type="button" onClick={onBack} disabled={busy}>
+          <ArrowLeft size={16} /> Back
+        </button>
+        <button
+          className="primary-button"
+          type="button"
+          disabled={!studentCount || busy}
+          onClick={() => onConfirm(buildSpeakerMap())}
+        >
+          {busy ? <Loader2 className="spin" size={18} /> : <Sparkles size={18} />}
+          {busy ? "Analysing…" : `Confirm & analyse ${studentCount} candidate${studentCount === 1 ? "" : "s"}`}
+        </button>
+      </div>
+      {busy ? <p className="rsa-hint">This runs one AI pass per candidate and can take up to a minute.</p> : null}
+    </div>
+  );
+}
+
+/* --- Step 3: the generated reports -------------------------------- */
+function ReportCard({ report, adminToken, onChanged }) {
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const overall = report.overall || {};
+  const student = report.student || {};
+
+  async function togglePublish() {
+    setSaving(true);
+    try {
+      await rsaApi.setVisibility(adminToken, report.id, !report.visible_to_student);
+      onChanged();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const skills = Object.entries(report.skill_ratings || {});
+
+  return (
+    <div className="rsa-report">
+      <div className="rsa-report-head">
+        <button type="button" className="rsa-expand" onClick={() => setOpen((value) => !value)}>
+          {open ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
+          <div>
+            <strong>{student.name || "Student"}</strong>
+            <span>{report.answers?.length || 0} questions answered</span>
+          </div>
+        </button>
+        <span className="rsa-score">{overall.score ?? "–"}<small>/10</small></span>
+        <span className={`status-pill ${verdictClass(overall.verdict)}`}>{overall.verdict || "n/a"}</span>
+        <button
+          type="button"
+          className={report.visible_to_student ? "rsa-pub on" : "rsa-pub"}
+          onClick={togglePublish}
+          disabled={saving}
+        >
+          {saving ? <Loader2 className="spin" size={15} /> : report.visible_to_student ? <Eye size={15} /> : <EyeOff size={15} />}
+          {report.visible_to_student ? "Visible to student" : "Publish to student"}
+        </button>
+      </div>
+
+      {open ? (
+        <div className="rsa-report-body">
+          {overall.summary ? <p className="rsa-summary">{overall.summary}</p> : null}
+
+          {report.interviewer_feedback ? (
+            <div className="rsa-quote">
+              <MessageSquareQuote size={16} />
+              <div>
+                <strong>Interviewer said</strong>
+                <p>{report.interviewer_feedback}</p>
+              </div>
+            </div>
+          ) : null}
+
+          <div className="rsa-cols">
+            <div>
+              <h4><CheckCircle2 size={15} /> Strengths</h4>
+              {report.strengths?.length ? (
+                <ul>{report.strengths.map((s) => <li key={s}>{s}</li>)}</ul>
+              ) : (
+                <p className="muted">None recorded.</p>
+              )}
+            </div>
+            <div>
+              <h4><Lightbulb size={15} /> Needs improvement</h4>
+              {report.improvements?.length ? (
+                <ul>
+                  {report.improvements.map((imp, index) => (
+                    <li key={index}>
+                      <span className={`rsa-prio ${imp.priority}`}>{imp.priority}</span>
+                      <strong>{imp.area}</strong> — {imp.detail}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="muted">None recorded.</p>
+              )}
+            </div>
+          </div>
+
+          {skills.length ? (
+            <>
+              <h4><BarChart3 size={15} /> Skills shown</h4>
+              <div className="rsa-skills">
+                {skills.map(([skill, rating]) => (
+                  <div className="rsa-skill" key={skill}>
+                    <span>{skill}</span>
+                    <div className="rsa-bar"><i style={{ width: `${((rating || 0) / 5) * 100}%` }} /></div>
+                    <b>{rating ?? "–"}/5</b>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : null}
+
+          <h4><CircleHelp size={15} /> Question by question</h4>
+          <div className="rsa-answers">
+            {(report.answers || []).map((answer, index) => (
+              <div className="rsa-answer" key={index}>
+                <div className="rsa-answer-head">
+                  <strong>{answer.question_text}</strong>
+                  <span className={`status-pill ${correctnessClass(answer.correctness)}`}>
+                    {(answer.correctness || "").replaceAll("_", " ")}
+                  </span>
+                  <span className="rsa-acc">{answer.accuracy ?? 0}%</span>
+                </div>
+                {answer.student_answer ? <p><em>Said:</em> {answer.student_answer}</p> : null}
+                {answer.feedback ? <p><em>Feedback:</em> {answer.feedback}</p> : null}
+                {answer.ideal_answer ? <p className="rsa-ideal"><em>Better answer:</em> {answer.ideal_answer}</p> : null}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/* --- Questions extracted for this opportunity --------------------- */
+function QuestionsPanel({ questions }) {
+  const [category, setCategory] = useState("all");
+  const categories = useMemo(
+    () => ["all", ...Array.from(new Set(questions.map((q) => q.category).filter(Boolean))).sort()],
+    [questions],
+  );
+  const visible = questions.filter((q) => category === "all" || q.category === category);
+
+  if (!questions.length) {
+    return <div className="empty-state compact"><p>No questions extracted yet. Analyse a transcript first.</p></div>;
+  }
+
+  return (
+    <>
+      <div className="controls-row" style={{ marginBottom: 12 }}>
+        <div className="filter-controls">
+          <label>Topic:</label>
+          <select className="sort-select" value={category} onChange={(event) => setCategory(event.target.value)}>
+            {categories.map((item) => (
+              <option key={item} value={item}>{item === "all" ? `All (${questions.length})` : item}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+      <div className="rsa-questions">
+        {visible.map((question) => (
+          <div className="rsa-question" key={question.id}>
+            <span className={`rsa-cat ${question.is_technical ? "tech" : ""}`}>{question.category}</span>
+            <div>
+              <strong>{question.question_text}</strong>
+              {question.asked_to ? <span>asked to {question.asked_to}</span> : null}
+            </div>
+            {question.difficulty ? <span className="mini-count">{question.difficulty}</span> : null}
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+/* --- The panel that ties it together ------------------------------ */
+function InterviewReportsPanel({ adminToken, opportunityId }) {
+  const [stage, setStage] = useState("idle"); // idle | review | done
+  const [rawText, setRawText] = useState("");
+  const [proposal, setProposal] = useState(null);
+  const [sessionId, setSessionId] = useState(null);
+  const [reports, setReports] = useState([]);
+  const [questions, setQuestions] = useState([]);
+  const [sessions, setSessions] = useState([]);
+  const [analysis, setAnalysis] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [tab, setTab] = useState("reports");
+
+  async function refreshSide() {
+    try {
+      const [q, s] = await Promise.all([
+        rsaApi.questions(adminToken, opportunityId),
+        rsaApi.sessions(adminToken, opportunityId),
+      ]);
+      setQuestions(q || []);
+      setSessions(s || []);
+    } catch {
+      /* side panels are best-effort */
+    }
+  }
+
+  useEffect(() => {
+    refreshSide();
+  }, [opportunityId, adminToken]);
+
+  async function loadReports(id) {
+    const data = await rsaApi.reports(adminToken, id);
+    setReports(data || []);
+  }
+
+  async function handlePropose(text) {
+    setBusy(true);
+    setError("");
+    try {
+      const result = await rsaApi.propose(adminToken, text, opportunityId);
+      setRawText(text);
+      setProposal(result);
+      setStage("review");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleConfirm(speakerMap) {
+    if (!proposal?.company?.id || !proposal?.opportunity?.id) {
+      setError("Could not resolve the company or opportunity for this transcript.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const confirmed = await rsaApi.confirm(adminToken, {
+        raw_text: rawText,
+        company_id: proposal.company.id,
+        opportunity_id: proposal.opportunity.id,
+        speaker_map: speakerMap,
+        round_name: "Technical Round",
+      });
+      setSessionId(confirmed.session_id);
+      const result = await rsaApi.analyze(adminToken, confirmed.session_id);
+      setAnalysis(result);
+      await loadReports(confirmed.session_id);
+      await refreshSide();
+      setStage("done");
+      setTab("reports");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function openSession(id) {
+    setBusy(true);
+    setError("");
+    try {
+      setSessionId(id);
+      await loadReports(id);
+      setAnalysis(null);
+      setStage("done");
+      setTab("reports");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function reset() {
+    setStage("idle");
+    setProposal(null);
+    setRawText("");
+    setReports([]);
+    setAnalysis(null);
+    setError("");
+  }
+
+  return (
+    <div className="panel wide">
+      <div className="panel-title">
+        <Mic size={20} />
+        <h2>Interviews &amp; RSA Reports</h2>
+        {sessions.length ? <span className="title-count">{sessions.length}</span> : null}
+        {stage !== "idle" ? (
+          <button type="button" className="back-button subtle" style={{ marginLeft: "auto" }} onClick={reset}>
+            <Send size={15} /> New transcript
+          </button>
+        ) : null}
+      </div>
+
+      {error ? <StatusMessage error={error} /> : null}
+
+      {stage === "idle" ? (
+        <>
+          <TranscriptUpload onPropose={handlePropose} busy={busy} />
+          {sessions.length ? (
+            <>
+              <h3 className="detail-subhead">Previous interviews</h3>
+              <div className="rsa-sessions">
+                {sessions.map((session) => (
+                  <button type="button" className="rsa-session" key={session.id} onClick={() => openSession(session.id)}>
+                    <div>
+                      <strong>{session.round_name || "Interview"}</strong>
+                      <span>{session.students?.length || 0} candidates · {formatDate(session.scheduled_at)}</span>
+                    </div>
+                    <span className={`status-pill ${session.ai_status === "completed" ? "good" : "neutral"}`}>
+                      {session.ai_status || "not started"}
+                    </span>
+                    <ArrowRight size={16} />
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : null}
+        </>
+      ) : null}
+
+      {stage === "review" && proposal ? (
+        <ProposalReview
+          proposal={proposal}
+          shortlist={proposal.shortlisted_students || []}
+          onBack={reset}
+          onConfirm={handleConfirm}
+          busy={busy}
+        />
+      ) : null}
+
+      {stage === "done" ? (
+        <>
+          {analysis ? (
+            <div className="status success" style={{ marginBottom: 14 }}>
+              <BadgeCheck size={18} />
+              <span>
+                Analysed {analysis.candidates_analyzed} candidate(s), extracted {analysis.questions_extracted} questions
+                {analysis.model ? ` · ${analysis.model}` : ""}
+              </span>
+            </div>
+          ) : null}
+
+          <div className="rsa-tabs">
+            <button type="button" className={tab === "reports" ? "active" : ""} onClick={() => setTab("reports")}>
+              Student feedback ({reports.length})
+            </button>
+            <button type="button" className={tab === "questions" ? "active" : ""} onClick={() => setTab("questions")}>
+              Questions asked ({questions.length})
+            </button>
+          </div>
+
+          {busy ? <PanelLoader /> : null}
+
+          {!busy && tab === "reports" ? (
+            reports.length ? (
+              <div className="rsa-reports">
+                {reports.map((report) => (
+                  <ReportCard
+                    key={report.id}
+                    report={report}
+                    adminToken={adminToken}
+                    onChanged={() => loadReports(sessionId)}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="empty-state compact"><p>No reports for this session.</p></div>
+            )
+          ) : null}
+
+          {!busy && tab === "questions" ? <QuestionsPanel questions={questions} /> : null}
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function OpportunityDetail({ detail, adminToken, opportunityId }) {
   const [searchStudent, setSearchStudent] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
 
@@ -1198,6 +2212,10 @@ function OpportunityDetail({ detail }) {
             <div className="empty-state compact"><p>{searchStudent ? "No applicants match your search." : "No applicants yet."}</p></div>
           )}
         </div>
+
+        {adminToken && opportunityId ? (
+          <InterviewReportsPanel adminToken={adminToken} opportunityId={opportunityId} />
+        ) : null}
       </section>
     </>
   );

@@ -1179,7 +1179,833 @@ input:focus {
   box-shadow: 0 0 0 2px rgba(15, 118, 110, 0.1);
 }
 
+/* ---------------- RSA interview reports ---------------- */
+
+/* student: sidebar nav buttons match the admin ones */
+.sidebar nav button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  padding: 0 10px;
+  color: #5c6875;
+  border: 0;
+  background: transparent;
+  border-radius: 6px;
+  font-weight: 700;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+
+.sidebar nav button:hover {
+  background: #f3f6f9;
+}
+
+.sidebar nav button.active {
+  background: #e8f4f2;
+  color: #0f766e;
+}
+
+.nav-count {
+  margin-left: auto;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: #0f766e;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 900;
+  display: inline-grid;
+  place-items: center;
+}
+
+/* student: feedback column on My Applications */
+.applications-table.with-feedback .applications-head,
+.applications-table.with-feedback .applications-row {
+  grid-template-columns: 1.1fr 1.25fr 0.8fr 0.7fr 0.85fr;
+}
+
+.rsa-feedback-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #bfe5d1;
+  background: #e8f6ef;
+  color: #0f766e;
+  border-radius: 999px;
+  padding: 6px 11px;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.rsa-feedback-btn:hover {
+  background: #d7efe4;
+}
+
+.rsa-mini-score {
+  font-weight: 900;
+  color: #065f57;
+}
+
+.rsa-hint {
+  color: #65717e;
+  font-size: 13px;
+  line-height: 1.5;
+  margin-bottom: 10px;
+}
+
+.rsa-textarea {
+  width: 100%;
+  min-height: 190px;
+  padding: 12px;
+  border: 1px solid #d7dee6;
+  border-radius: 8px;
+  background: #fbfdfe;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: #202124;
+  resize: vertical;
+}
+
+.rsa-textarea:focus {
+  outline: none;
+  border-color: #0f766e;
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.12);
+}
+
+.rsa-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.rsa-actions .primary-button {
+  padding: 0 18px;
+}
+
+/* detected summary */
+.rsa-detected {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.rsa-detected div {
+  background: #f7f9fb;
+  border: 1px solid #e5eaf0;
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: grid;
+  gap: 3px;
+}
+
+.rsa-detected span {
+  font-size: 12px;
+  color: #65717e;
+}
+
+.rsa-detected strong {
+  font-size: 15px;
+}
+
+.rsa-warnings {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.rsa-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: #fef8ec;
+  border: 1px solid #f6e2bd;
+  color: #92400e;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.rsa-warning svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+/* speaker mapping */
+.rsa-map {
+  display: grid;
+  gap: 8px;
+}
+
+.rsa-map-row {
+  display: grid;
+  grid-template-columns: 1.3fr 1.1fr auto;
+  gap: 12px;
+  align-items: center;
+  background: #fff;
+  border: 1px solid #e8edf2;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.rsa-speaker {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.rsa-speaker strong {
+  overflow-wrap: anywhere;
+}
+
+.rsa-speaker span {
+  font-size: 12px;
+  color: #65717e;
+}
+
+.rsa-noshow {
+  margin-top: 12px;
+  padding: 10px 12px;
+  background: #f7f9fb;
+  border: 1px dashed #cbd3dc;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #45525f;
+}
+
+/* previous sessions */
+.rsa-sessions {
+  display: grid;
+  gap: 8px;
+}
+
+.rsa-session {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 12px;
+  align-items: center;
+  text-align: left;
+  background: #fff;
+  border: 1px solid #e5eaf0;
+  border-radius: 8px;
+  padding: 12px 14px;
+  cursor: pointer;
+  color: inherit;
+}
+
+.rsa-session:hover {
+  border-color: #bfe5d1;
+  box-shadow: 0 3px 12px rgba(15, 23, 42, 0.08);
+}
+
+.rsa-session div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.rsa-session span {
+  font-size: 12.5px;
+  color: #65717e;
+}
+
+/* tabs */
+.rsa-tabs {
+  display: flex;
+  gap: 6px;
+  border-bottom: 1px solid #e5eaf0;
+  margin-bottom: 14px;
+}
+
+.rsa-tabs button {
+  border: 0;
+  background: transparent;
+  padding: 9px 14px;
+  font-weight: 800;
+  font-size: 13px;
+  color: #65717e;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+
+.rsa-tabs button.active {
+  color: #0f766e;
+  border-bottom-color: #0f766e;
+}
+
+/* report cards */
+.rsa-reports {
+  display: grid;
+  gap: 10px;
+}
+
+.rsa-report {
+  border: 1px solid #e5eaf0;
+  border-radius: 8px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.rsa-report-head {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 14px;
+}
+
+.rsa-expand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  padding: 0;
+  color: inherit;
+  min-width: 0;
+}
+
+.rsa-expand div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.rsa-expand span {
+  font-size: 12px;
+  color: #65717e;
+}
+
+.rsa-score {
+  font-size: 20px;
+  font-weight: 900;
+  color: #0f766e;
+  white-space: nowrap;
+}
+
+.rsa-score small {
+  font-size: 12px;
+  font-weight: 700;
+  color: #94a3b8;
+}
+
+.rsa-pub {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #d7dee6;
+  background: #fff;
+  color: #45525f;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.rsa-pub:hover:not(:disabled) {
+  border-color: #0f766e;
+  color: #0f766e;
+}
+
+.rsa-pub.on {
+  background: #e8f6ef;
+  border-color: #bfe5d1;
+  color: #0f766e;
+}
+
+.rsa-report-body {
+  border-top: 1px solid #e5eaf0;
+  background: #fbfcfd;
+  padding: 14px;
+  display: grid;
+  gap: 14px;
+}
+
+.rsa-report-body h4 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 8px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #4b5563;
+}
+
+.rsa-summary {
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: #334155;
+  margin: 0;
+}
+
+.rsa-quote {
+  display: flex;
+  gap: 10px;
+  padding: 12px;
+  background: #f2f7f6;
+  border: 1px solid #d7e8e5;
+  border-radius: 8px;
+}
+
+.rsa-quote svg {
+  color: #0f766e;
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.rsa-quote strong {
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #0f766e;
+  margin-bottom: 4px;
+}
+
+.rsa-quote p {
+  font-size: 13px;
+  line-height: 1.55;
+  color: #334155;
+  font-style: italic;
+}
+
+.rsa-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.rsa-cols ul {
+  margin: 0;
+  padding-left: 16px;
+  display: grid;
+  gap: 6px;
+}
+
+.rsa-cols li {
+  font-size: 13px;
+  line-height: 1.5;
+  color: #334155;
+}
+
+.rsa-prio {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 999px;
+  margin-right: 6px;
+  background: #eef2f5;
+  color: #4b5563;
+}
+
+.rsa-prio.high {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.rsa-prio.medium {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.rsa-prio.low {
+  background: #e7eef8;
+  color: #1d4ed8;
+}
+
+/* skills */
+.rsa-skills {
+  display: grid;
+  gap: 7px;
+}
+
+.rsa-skill {
+  display: grid;
+  grid-template-columns: 130px 1fr 46px;
+  gap: 10px;
+  align-items: center;
+  font-size: 12.5px;
+}
+
+.rsa-skill span {
+  color: #45525f;
+  text-transform: capitalize;
+  overflow-wrap: anywhere;
+}
+
+.rsa-skill b {
+  text-align: right;
+  color: #0f766e;
+}
+
+.rsa-bar {
+  height: 8px;
+  background: #eef2f5;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.rsa-bar i {
+  display: block;
+  height: 100%;
+  background: #0f766e;
+  border-radius: 999px;
+}
+
+/* answers */
+.rsa-answers {
+  display: grid;
+  gap: 8px;
+}
+
+.rsa-answer {
+  background: #fff;
+  border: 1px solid #e8edf2;
+  border-radius: 8px;
+  padding: 11px 12px;
+  display: grid;
+  gap: 6px;
+}
+
+.rsa-answer-head {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.rsa-answer-head strong {
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.rsa-acc {
+  font-size: 12px;
+  font-weight: 900;
+  color: #45525f;
+  white-space: nowrap;
+}
+
+.rsa-answer p {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: #475569;
+}
+
+.rsa-answer em {
+  color: #94a3b8;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.rsa-ideal {
+  background: #f2f7f6;
+  border-left: 3px solid #0f766e;
+  padding: 7px 10px;
+  border-radius: 0 6px 6px 0;
+}
+
+/* questions */
+.rsa-questions {
+  display: grid;
+  gap: 8px;
+}
+
+.rsa-question {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 12px;
+  align-items: center;
+  background: #fff;
+  border: 1px solid #e8edf2;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.rsa-question div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.rsa-question strong {
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.rsa-question span {
+  font-size: 11.5px;
+  color: #65717e;
+}
+
+.rsa-cat {
+  font-size: 10.5px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: #eef2f5;
+  color: #4b5563;
+  white-space: nowrap;
+}
+
+.rsa-cat.tech {
+  background: #e8f4f2;
+  color: #0f766e;
+}
+
+.rsa-cat.scenario {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+/* practice bank */
+.rsa-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #e5eaf0;
+  margin-bottom: 14px;
+}
+
+.rsa-filters .search-input {
+  flex: 1 1 240px;
+  max-width: none;
+}
+
+.rsa-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border: 1px solid #d7dee6;
+  border-radius: 999px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #45525f;
+  white-space: nowrap;
+}
+
+.rsa-toggle:hover {
+  border-color: #bfe5d1;
+}
+
+.rsa-toggle input {
+  width: 15px;
+  height: 15px;
+  min-height: 0;
+  accent-color: #0f766e;
+  cursor: pointer;
+}
+
+.rsa-toggle span {
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.rsa-practices {
+  display: grid;
+  gap: 8px;
+}
+
+.rsa-practice {
+  border: 1px solid #e8edf2;
+  border-radius: 8px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.rsa-practice-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 12px;
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+}
+
+.rsa-practice-head:hover {
+  background: #f8fafc;
+}
+
+.rsa-practice-head svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: #94a3b8;
+}
+
+.rsa-practice-q {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.rsa-practice-q strong {
+  font-size: 13.5px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.rsa-practice-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.rsa-companies {
+  font-size: 11.5px;
+  color: #65717e;
+}
+
+.rsa-practice-body {
+  border-top: 1px solid #e8edf2;
+  background: #f7fbfa;
+  padding: 12px;
+}
+
+.rsa-practice-body h4 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 6px;
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #0f766e;
+}
+
+.rsa-practice-body p {
+  font-size: 13px;
+  line-height: 1.6;
+  color: #334155;
+}
+
+.rsa-practice-body > div + div {
+  margin-top: 12px;
+}
+
+/* why they ask this */
+.rsa-why p {
+  color: #45525f;
+}
+
+/* what to prepare */
+.rsa-prep-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.rsa-prep-chip {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #fff;
+  border: 1px solid #bfe5d1;
+  color: #0f766e;
+}
+
+/* company focus */
+.rsa-focus {
+  background: #f2f7f6;
+  border: 1px solid #d7e8e5;
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+}
+
+.rsa-focus > strong {
+  display: block;
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #0f766e;
+  margin-bottom: 8px;
+}
+
+.rsa-focus-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.rsa-focus-chip {
+  font-size: 12.5px;
+  font-weight: 800;
+  padding: 5px 11px;
+  border-radius: 999px;
+  background: #0f766e;
+  color: #fff;
+}
+
+/* topic groups */
+.rsa-group {
+  margin-bottom: 16px;
+}
+
+.rsa-group-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+/* "Reviewed" tag replaces the score/verdict in the student view */
+.rsa-review-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 800;
+  color: #0f766e;
+  background: #e8f4f2;
+  border-radius: 999px;
+  padding: 5px 11px;
+  white-space: nowrap;
+}
+
 @media (max-width: 900px) {
+  .rsa-cols,
+  .rsa-map-row,
+  .rsa-report-head,
+  .rsa-answer-head,
+  .rsa-question {
+    grid-template-columns: 1fr;
+  }
+
+  .rsa-skill {
+    grid-template-columns: 100px 1fr 42px;
+  }
+
   .dashboard-shell {
     grid-template-columns: 1fr;
   }
