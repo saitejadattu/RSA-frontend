@@ -1967,6 +1967,108 @@ input:focus {
   color: #fff;
 }
 
+/* collapsible panel header */
+.panel-title.collapsible {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+}
+
+.panel-title.collapsible:hover h2 {
+  color: #0f766e;
+}
+
+.panel-toggle {
+  margin-left: auto;
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: #eef2f5;
+  color: #4b5563;
+  flex: 0 0 auto;
+}
+
+.panel-title.collapsible:hover .panel-toggle {
+  background: #e8f4f2;
+  color: #0f766e;
+}
+
+/* when a toggle is present the count should not eat the free space */
+.panel-title.collapsible .title-count {
+  margin-left: 0;
+}
+
+/* sheet import preview */
+.rsa-skiplist {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.rsa-skiplist div {
+  display: grid;
+  gap: 2px;
+  padding: 8px 11px;
+  background: #fff1f2;
+  border: 1px solid #fbd5da;
+  border-radius: 6px;
+}
+
+.rsa-skiplist strong {
+  font-size: 12.5px;
+  color: #991b1b;
+}
+
+.rsa-skiplist span {
+  font-size: 12px;
+  color: #9f5b60;
+}
+
+.rsa-preview-table {
+  border: 1px solid #e5eaf0;
+  border-radius: 8px;
+  overflow: hidden;
+  max-height: 340px;
+  overflow-y: auto;
+  margin-bottom: 6px;
+}
+
+.rsa-preview-row {
+  display: grid;
+  grid-template-columns: 34px 1.5fr auto 1fr;
+  gap: 10px;
+  align-items: center;
+  padding: 9px 12px;
+  background: #fff;
+  border-bottom: 1px solid #eef2f5;
+}
+
+.rsa-preview-row:last-child {
+  border-bottom: 0;
+}
+
+.rsa-preview-row > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.rsa-preview-row strong {
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.rsa-preview-row span {
+  font-size: 12px;
+}
+
 /* topic groups */
 .rsa-group {
   margin-bottom: 16px;

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   AlertCircle,
@@ -28,6 +28,7 @@ import {
   Code,
   ChevronDown,
   ChevronRight,
+  ChevronUp,
   CircleHelp,
   Lightbulb,
   MessageSquareQuote,
@@ -35,6 +36,7 @@ import {
   Send,
   Sparkles,
   TriangleAlert,
+  Upload,
   Wand2,
 } from "lucide-react";
 import "./styles.css";
@@ -42,6 +44,48 @@ import "./styles.css";
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
 const ACCESS_TOKEN_KEY = "rsa_student_access_token";
 const ADMIN_TOKEN_KEY = "rsa_admin_token";
+
+/* ------------------------------------------------------------------ *
+ *  Hash routing
+ *
+ *  Navigation used to live only in React state, so refreshing threw you
+ *  back to the overview and the browser Back button did nothing. Keeping
+ *  it in the URL fixes both, and makes a given opportunity linkable.
+ *
+ *    #/admin
+ *    #/admin/students
+ *    #/admin/company/<companyId>
+ *    #/admin/company/<companyId>/opp/<opportunityId>
+ *    #/student
+ *    #/student/feedback
+ * ------------------------------------------------------------------ */
+function parseHash() {
+  return window.location.hash.replace(/^#\/?/, "").split("/").filter(Boolean);
+}
+
+function useHashRoute() {
+  const [route, setRoute] = useState(parseHash);
+
+  useEffect(() => {
+    const onChange = () => setRoute(parseHash());
+    window.addEventListener("hashchange", onChange);
+    return () => window.removeEventListener("hashchange", onChange);
+  }, []);
+
+  // push -> a new history entry so Back works; replace -> silent sync.
+  const navigate = useCallback((parts, { replace = false } = {}) => {
+    const next = "#/" + parts.filter(Boolean).join("/");
+    if (window.location.hash === next) return;
+    if (replace) {
+      window.history.replaceState(null, "", next);
+      setRoute(parseHash());
+    } else {
+      window.location.hash = next;
+    }
+  }, []);
+
+  return [route, navigate];
+}
 
 async function apiRequest(path, { method = "GET", body, token, adminToken } = {}) {
   const response = await fetch(`${API_BASE_URL}${path}`, {
@@ -68,12 +112,25 @@ async function apiRequest(path, { method = "GET", body, token, adminToken } = {}
 }
 
 function App() {
+  const [route, navigate] = useHashRoute();
   const [token, setToken] = useState(() => localStorage.getItem(ACCESS_TOKEN_KEY));
   const [adminToken, setAdminToken] = useState(() => localStorage.getItem(ADMIN_TOKEN_KEY));
-  const [mode, setMode] = useState(() => (localStorage.getItem(ADMIN_TOKEN_KEY) ? "admin" : "student"));
+  // The URL decides the mode when it says so, otherwise fall back to whichever
+  // token we hold. This is what keeps a refresh on an admin page in admin mode.
+  const [mode, setMode] = useState(() => {
+    const first = parseHash()[0];
+    if (first === "admin" || first === "student") return first;
+    return localStorage.getItem(ADMIN_TOKEN_KEY) ? "admin" : "student";
+  });
   const [student, setStudent] = useState(null);
   const [loadingStudent, setLoadingStudent] = useState(Boolean(token) && mode === "student");
   const [authView, setAuthView] = useState("login");
+
+  // Follow Back/Forward between the two modes.
+  useEffect(() => {
+    const first = route[0];
+    if ((first === "admin" || first === "student") && first !== mode) setMode(first);
+  }, [route, mode]);
 
   useEffect(() => {
     if (mode !== "student" || !token) {
@@ -115,18 +172,26 @@ function App() {
     setStudent(null);
     setAuthView("login");
     setMode("student");
+    navigate(["student"], { replace: true });
   }
 
   function handleAdminAuthenticated(value) {
     localStorage.setItem(ADMIN_TOKEN_KEY, value);
     setAdminToken(value);
     setMode("admin");
+    navigate(["admin"], { replace: true });
   }
 
   function handleAdminLogout() {
     localStorage.removeItem(ADMIN_TOKEN_KEY);
     setAdminToken(null);
     setMode("student");
+    navigate(["student"], { replace: true });
+  }
+
+  function switchMode(next) {
+    setMode(next);
+    navigate([next]);
   }
 
   if (loadingStudent) {
@@ -135,9 +200,16 @@ function App() {
 
   if (mode === "admin") {
     if (!adminToken) {
-      return <AdminAccess onAuthenticated={handleAdminAuthenticated} onStudentMode={() => setMode("student")} />;
+      return <AdminAccess onAuthenticated={handleAdminAuthenticated} onStudentMode={() => switchMode("student")} />;
     }
-    return <AdminDashboard adminToken={adminToken} onLogout={handleAdminLogout} />;
+    return (
+      <AdminDashboard
+        adminToken={adminToken}
+        onLogout={handleAdminLogout}
+        route={route}
+        navigate={navigate}
+      />
+    );
   }
 
   if (!token || !student) {
@@ -146,12 +218,20 @@ function App() {
         authView={authView}
         setAuthView={setAuthView}
         onAuthenticated={handleAuthenticated}
-        onAdminMode={() => setMode("admin")}
+        onAdminMode={() => switchMode("admin")}
       />
     );
   }
 
-  return <StudentDashboard student={student} token={token} onLogout={handleLogout} />;
+  return (
+    <StudentDashboard
+      student={student}
+      token={token}
+      onLogout={handleLogout}
+      route={route}
+      navigate={navigate}
+    />
+  );
 }
 
 function LoadingScreen() {
@@ -768,11 +848,16 @@ function StudentReportsView({ reports, loading, focusId, token }) {
   );
 }
 
-function StudentDashboard({ student, token, onLogout }) {
+function StudentDashboard({ student, token, onLogout, route = [], navigate = () => {} }) {
   const [dashboard, setDashboard] = useState(null);
   const [dashboardError, setDashboardError] = useState("");
   const [loadingDashboard, setLoadingDashboard] = useState(true);
-  const [view, setView] = useState("dashboard");
+  // #/student/feedback survives a refresh; anything else is the dashboard.
+  const view = route[1] === "feedback" ? "reports" : "dashboard";
+  const setView = useCallback(
+    (next) => navigate(["student", next === "reports" ? "feedback" : ""]),
+    [navigate],
+  );
   const [reports, setReports] = useState([]);
   const [loadingReports, setLoadingReports] = useState(true);
   const [focusReportId, setFocusReportId] = useState(null);
@@ -1087,11 +1172,14 @@ function ApplicationRow({ application, report, onOpenReport }) {
   );
 }
 
-function AdminDashboard({ adminToken, onLogout }) {
+function AdminDashboard({ adminToken, onLogout, route = [], navigate = () => {} }) {
   const [dashboard, setDashboard] = useState(null);
   const [students, setStudents] = useState([]);
-  const [activeView, setActiveView] = useState("overview");
-  const [companyId, setCompanyId] = useState(null);
+  // Navigation lives in the URL: #/admin, #/admin/students,
+  // #/admin/company/<id>[/opp/<id>]. A refresh therefore lands where you were.
+  const activeView = route[1] === "students" ? "students" : route[1] === "company" ? "company" : "overview";
+  const companyId = route[1] === "company" ? route[2] || null : null;
+  const routeOppId = route[3] === "opp" ? route[4] || null : null;
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [loadingStudents, setLoadingStudents] = useState(false);
@@ -1118,24 +1206,26 @@ function AdminDashboard({ adminToken, onLogout }) {
   }
 
   function openStudentsView() {
-    setActiveView("students");
-    if (!students.length) loadStudents();
+    navigate(["admin", "students"]);
   }
 
   function openCompany(company) {
     if (!company?.id) return;
-    setCompanyId(company.id);
-    setActiveView("company");
+    navigate(["admin", "company", company.id]);
   }
 
   function backToOverview() {
-    setActiveView("overview");
-    setCompanyId(null);
+    navigate(["admin"]);
   }
 
   useEffect(() => {
     loadDashboard();
   }, [adminToken]);
+
+  // Deep-linking straight to #/admin/students needs the list fetched too.
+  useEffect(() => {
+    if (activeView === "students" && !students.length && !loadingStudents) loadStudents();
+  }, [activeView]);
 
   const summary = dashboard?.summary || {};
   const recentOpportunities = dashboard?.recent_opportunities || [];
@@ -1181,7 +1271,7 @@ function AdminDashboard({ adminToken, onLogout }) {
           <span>RSA Admin</span>
         </div>
         <nav>
-          <button className={activeView === "overview" ? "active" : ""} type="button" onClick={() => setActiveView("overview")}>
+          <button className={activeView === "overview" ? "active" : ""} type="button" onClick={backToOverview}>
             <BarChart3 size={18} /> Overview
           </button>
           <button className={activeView === "students" ? "active" : ""} type="button" onClick={openStudentsView}>
@@ -1196,7 +1286,16 @@ function AdminDashboard({ adminToken, onLogout }) {
 
       <section className="dashboard-main">
         {activeView === "company" ? (
-          <CompanyDetailView adminToken={adminToken} companyId={companyId} onBack={backToOverview} />
+          <CompanyDetailView
+            adminToken={adminToken}
+            companyId={companyId}
+            onBack={backToOverview}
+            selectedOppId={routeOppId}
+            onSelectOpp={(oppId) =>
+              navigate(oppId ? ["admin", "company", companyId, "opp", oppId] : ["admin", "company", companyId])
+            }
+            onDataChanged={loadDashboard}
+          />
         ) : (
         <>
         <header className="topbar">
@@ -1316,26 +1415,36 @@ function AdminDashboard({ adminToken, onLogout }) {
   );
 }
 
-function CompanyDetailView({ adminToken, companyId, onBack }) {
+function CompanyDetailView({ adminToken, companyId, onBack, selectedOppId, onSelectOpp, onDataChanged }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [selectedOppId, setSelectedOppId] = useState(null);
   const [oppData, setOppData] = useState(null);
   const [loadingOpp, setLoadingOpp] = useState(false);
+  // Bumped after an import so BOTH the company stat tiles and the opportunity
+  // detail refetch. Previously only the opportunity reloaded, which is why the
+  // numbers at the top only changed after a manual page refresh.
+  const [reloadKey, setReloadKey] = useState(0);
+  const autoSelected = useRef(null);
 
   useEffect(() => {
     let live = true;
     setLoading(true);
     setError("");
-    setSelectedOppId(null);
-    setOppData(null);
     apiRequest(`/admin/companies/${companyId}`, { adminToken })
       .then((detail) => {
         if (!live) return;
         setData(detail);
-        if (detail.opportunity_count === 1 && detail.opportunities?.[0]) {
-          setSelectedOppId(detail.opportunities[0].id);
+        // With a single opening there is nothing to choose, so open it - but
+        // only once per company, or it would fight a manual "back to list".
+        if (
+          detail.opportunity_count === 1
+          && detail.opportunities?.[0]
+          && !selectedOppId
+          && autoSelected.current !== companyId
+        ) {
+          autoSelected.current = companyId;
+          onSelectOpp(detail.opportunities[0].id);
         }
       })
       .catch((err) => live && setError(err.message))
@@ -1343,7 +1452,7 @@ function CompanyDetailView({ adminToken, companyId, onBack }) {
     return () => {
       live = false;
     };
-  }, [companyId, adminToken]);
+  }, [companyId, adminToken, reloadKey]);
 
   useEffect(() => {
     if (!selectedOppId) {
@@ -1359,7 +1468,12 @@ function CompanyDetailView({ adminToken, companyId, onBack }) {
     return () => {
       live = false;
     };
-  }, [selectedOppId, adminToken]);
+  }, [selectedOppId, adminToken, reloadKey]);
+
+  function refreshAll() {
+    setReloadKey((value) => value + 1);
+    onDataChanged?.();
+  }
 
   const company = data?.company;
   const opportunities = data?.opportunities || [];
@@ -1396,20 +1510,25 @@ function CompanyDetailView({ adminToken, companyId, onBack }) {
           </section>
 
           {multi && !selectedOppId ? (
-            <OpportunityChooser opportunities={opportunities} onSelect={setSelectedOppId} />
+            <OpportunityChooser opportunities={opportunities} onSelect={onSelectOpp} />
           ) : null}
 
           {selectedOppId ? (
             <>
               {multi ? (
-                <button type="button" className="back-button subtle" onClick={() => setSelectedOppId(null)}>
+                <button type="button" className="back-button subtle" onClick={() => onSelectOpp(null)}>
                   <ArrowLeft size={16} /> Other opportunities ({data.opportunity_count})
                 </button>
               ) : null}
               {loadingOpp || !oppData ? (
                 <PanelLoader />
               ) : (
-                <OpportunityDetail detail={oppData} adminToken={adminToken} opportunityId={selectedOppId} />
+                <OpportunityDetail
+                  detail={oppData}
+                  adminToken={adminToken}
+                  opportunityId={selectedOppId}
+                  onRefresh={refreshAll}
+                />
               )}
             </>
           ) : null}
@@ -1499,6 +1618,21 @@ const rsaApi = {
     apiRequest(`/admin/questions?opportunity_id=${opportunityId}&technical_only=false`, { adminToken }),
   sessions: (adminToken, opportunityId) =>
     apiRequest(`/interview-sessions/?opportunity_id=${opportunityId}`, { adminToken }),
+};
+
+const sheetApi = {
+  preview: (adminToken, opportunityId, kind, rawText) =>
+    apiRequest(`/admin/opportunities/${opportunityId}/import/${kind}`, {
+      method: "POST",
+      adminToken,
+      body: { raw_text: rawText, confirm: false },
+    }),
+  confirm: (adminToken, opportunityId, kind, rawText) =>
+    apiRequest(`/admin/opportunities/${opportunityId}/import/${kind}`, {
+      method: "POST",
+      adminToken,
+      body: { raw_text: rawText, confirm: true },
+    }),
 };
 
 const IGNORE = "__ignore__";
@@ -1841,6 +1975,249 @@ function QuestionsPanel({ questions }) {
   );
 }
 
+/* --- Paste a response / shortlist sheet for this opening ----------- */
+function SheetImportPanel({ adminToken, opportunityId, onImported }) {
+  const [kind, setKind] = useState("responses");
+  const [text, setText] = useState("");
+  const [preview, setPreview] = useState(null);
+  const [applied, setApplied] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  function reset() {
+    setPreview(null);
+    setApplied(null);
+    setError("");
+  }
+
+  function switchKind(next) {
+    setKind(next);
+    setText("");
+    reset();
+  }
+
+  async function handlePreview() {
+    setBusy(true);
+    reset();
+    try {
+      setPreview(await sheetApi.preview(adminToken, opportunityId, kind, text));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleConfirm() {
+    setBusy(true);
+    setError("");
+    try {
+      const result = await sheetApi.confirm(adminToken, opportunityId, kind, text);
+      setApplied(result);
+      setPreview(null);
+      setText("");
+      onImported?.();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const counts = preview?.counts || {};
+  const problems = (preview?.rows || []).filter((row) => row.action === "skip");
+
+  return (
+    <div className="panel wide">
+      <div className="panel-title">
+        <Upload size={20} />
+        <h2>Import sheet data</h2>
+      </div>
+      <p className="rsa-hint">
+        For sheets that couldn&apos;t be downloaded. Paste straight from Google Sheets — you&apos;ll see
+        exactly what will change before anything is saved.
+      </p>
+
+      <div className="rsa-tabs">
+        <button type="button" className={kind === "responses" ? "active" : ""} onClick={() => switchKind("responses")}>
+          Student responses
+        </button>
+        <button type="button" className={kind === "shortlist" ? "active" : ""} onClick={() => switchKind("shortlist")}>
+          Shortlist
+        </button>
+      </div>
+
+      {error ? <StatusMessage error={error} /> : null}
+
+      {applied ? (
+        <div className="status success" style={{ marginBottom: 12 }}>
+          <BadgeCheck size={18} />
+          <span>
+            Imported {applied.counts.rows} row(s):{" "}
+            {kind === "responses"
+              ? `${applied.counts.applications_to_create} created, ${applied.counts.applications_to_update} updated, ${applied.counts.students_to_create} new students`
+              : `${applied.counts.applications_to_mark} marked shortlisted, ${applied.counts.applications_to_create} created`}
+            {applied.counts.status_preserved
+              ? ` · ${applied.counts.status_preserved} kept their existing status`
+              : ""}
+          </span>
+        </div>
+      ) : null}
+
+      {!preview ? (
+        <>
+          <textarea
+            className="rsa-textarea"
+            value={text}
+            onChange={(event) => setText(event.target.value)}
+            spellCheck={false}
+            placeholder={
+              kind === "responses"
+                ? "Paste the response sheet INCLUDING its header row (Timestamp, Student UID, Student Name, Email, Mobile Number, …)"
+                : "Paste the shortlist sheet rows (Full Name, Email Id, … , Interested / Not Interested)"
+            }
+          />
+          <div className="rsa-actions">
+            <span className="muted">
+              {text.trim() ? `${text.trim().split("\n").length} line(s)` : "Empty"}
+            </span>
+            <button className="primary-button" type="button" disabled={!text.trim() || busy} onClick={handlePreview}>
+              {busy ? <Loader2 className="spin" size={18} /> : <Eye size={18} />}
+              Preview changes
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="rsa-detected">
+            <div><span>Rows read</span><strong>{counts.rows ?? 0}</strong></div>
+            <div>
+              <span>{kind === "responses" ? "Applications to create" : "To mark shortlisted"}</span>
+              <strong>{kind === "responses" ? counts.applications_to_create ?? 0 : counts.applications_to_mark ?? 0}</strong>
+            </div>
+            <div>
+              <span>{kind === "responses" ? "To update" : "New applications"}</span>
+              <strong>{kind === "responses" ? counts.applications_to_update ?? 0 : counts.applications_to_create ?? 0}</strong>
+            </div>
+            {kind === "responses" ? (
+              <div><span>New students</span><strong>{counts.students_to_create ?? 0}</strong></div>
+            ) : (
+              <div><span>Unmatched (skipped)</span><strong>{counts.unmatched ?? 0}</strong></div>
+            )}
+          </div>
+
+          {counts.status_preserved ? (
+            <div className="rsa-warning" style={{ marginBottom: 10 }}>
+              <ShieldCheck size={16} />
+              <span>
+                {counts.status_preserved} student(s) are already past &quot;applied&quot; — their pipeline
+                status will be kept, only their sheet details get refreshed.
+              </span>
+            </div>
+          ) : null}
+
+          {kind === "responses" && counts.students_to_create ? (
+            <div className="rsa-warning" style={{ marginBottom: 10 }}>
+              <TriangleAlert size={16} />
+              <span>
+                {counts.students_to_create} new student account(s) will be created. Their initial
+                password is their mobile number.
+              </span>
+            </div>
+          ) : null}
+
+          {kind === "shortlist" && counts.unmatched ? (
+            <div className="rsa-warning" style={{ marginBottom: 10 }}>
+              <TriangleAlert size={16} />
+              <span>
+                {counts.unmatched} row(s) don&apos;t match anyone who applied to this opening and will
+                be skipped. Shortlist imports never create students — import their response sheet
+                first.
+              </span>
+            </div>
+          ) : null}
+
+          {counts.matched_by_name ? (
+            <div className="rsa-warning" style={{ marginBottom: 10 }}>
+              <UserRound size={16} />
+              <span>
+                {counts.matched_by_name} row(s) had no email or phone and were matched by name
+                against this opening&apos;s applicants. Check them in the table below.
+              </span>
+            </div>
+          ) : null}
+
+          {counts.ambiguous ? (
+            <div className="rsa-warning" style={{ marginBottom: 10 }}>
+              <TriangleAlert size={16} />
+              <span>
+                {counts.ambiguous} row(s) matched more than one applicant by name and will be
+                skipped. Add an email column to the sheet to resolve them.
+              </span>
+            </div>
+          ) : null}
+
+          {preview.willing_breakdown ? (
+            <p className="muted" style={{ marginBottom: 10 }}>
+              Willing to join — interested: {preview.willing_breakdown.interested} · not interested:{" "}
+              {preview.willing_breakdown.not_interested} · no response: {preview.willing_breakdown.no_response}
+            </p>
+          ) : null}
+
+          {problems.length ? (
+            <>
+              <h3 className="detail-subhead">Rows that will be skipped ({problems.length})</h3>
+              <div className="rsa-skiplist">
+                {problems.map((row) => (
+                  <div key={row.row}>
+                    <strong>Row {row.row}{row.name ? ` · ${row.name}` : ""}</strong>
+                    <span>{row.reason}</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : null}
+
+          <h3 className="detail-subhead">What will happen</h3>
+          <div className="rsa-preview-table">
+            {(preview.rows || []).slice(0, 60).map((row) => (
+              <div className="rsa-preview-row" key={row.row}>
+                <span className="muted">{row.row}</span>
+                <div>
+                  <strong>{row.name || "(no name)"}</strong>
+                  <span>{row.email || row.phone || "no contact"}</span>
+                </div>
+                <span className={`status-pill ${row.action === "skip" ? "bad" : row.action.includes("create") ? "neutral" : "good"}`}>
+                  {row.action.replaceAll("_", " ")}
+                </span>
+                <span className="muted">
+                  {row.matched_via === "name" ? <em>matched by name · </em> : null}
+                  {row.status_preserved_from ? `keeps ${row.status_preserved_from}` : row.status || row.willing_to_join || ""}
+                </span>
+              </div>
+            ))}
+            {(preview.rows || []).length > 60 ? (
+              <p className="muted" style={{ padding: 10 }}>
+                …and {preview.rows.length - 60} more rows.
+              </p>
+            ) : null}
+          </div>
+
+          <div className="rsa-actions">
+            <button className="back-button" type="button" onClick={reset} disabled={busy}>
+              <ArrowLeft size={16} /> Back
+            </button>
+            <button className="primary-button" type="button" onClick={handleConfirm} disabled={busy}>
+              {busy ? <Loader2 className="spin" size={18} /> : <BadgeCheck size={18} />}
+              Confirm import
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 /* --- The panel that ties it together ------------------------------ */
 function InterviewReportsPanel({ adminToken, opportunityId }) {
   const [stage, setStage] = useState("idle"); // idle | review | done
@@ -2043,9 +2420,10 @@ function InterviewReportsPanel({ adminToken, opportunityId }) {
   );
 }
 
-function OpportunityDetail({ detail, adminToken, opportunityId }) {
+function OpportunityDetail({ detail, adminToken, opportunityId, onRefresh }) {
   const [searchStudent, setSearchStudent] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
+  const [applicantsOpen, setApplicantsOpen] = useState(true);
 
   const o = detail.opportunity || {};
   const stats = detail.stats || {};
@@ -2159,13 +2537,21 @@ function OpportunityDetail({ detail, adminToken, opportunityId }) {
         </div>
 
         <div className="panel wide">
-          <div className="panel-title">
+          <button
+            type="button"
+            className="panel-title collapsible"
+            onClick={() => setApplicantsOpen((value) => !value)}
+            aria-expanded={applicantsOpen}
+          >
             <UsersRound size={20} />
             <h2>Applicants</h2>
             <span className="title-count">{filteredApplicants.length}</span>
-          </div>
+            <span className="panel-toggle">
+              {applicantsOpen ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+            </span>
+          </button>
 
-          {applicants.length > 0 && (
+          {applicantsOpen && applicants.length > 0 && (
             <div className="applicants-controls">
               <div className="search-field">
                 <input
@@ -2196,25 +2582,34 @@ function OpportunityDetail({ detail, adminToken, opportunityId }) {
             </div>
           )}
 
-          {filteredApplicants.length ? (
-            <div className="admin-table applicants-table">
-              <div className="admin-head">
-                <span>Student</span>
-                <span>Status</span>
-                <span>Applied</span>
-                <span>Links</span>
+          {applicantsOpen ? (
+            filteredApplicants.length ? (
+              <div className="admin-table applicants-table">
+                <div className="admin-head">
+                  <span>Student</span>
+                  <span>Status</span>
+                  <span>Applied</span>
+                  <span>Links</span>
+                </div>
+                {filteredApplicants.map((applicant) => (
+                  <ApplicantRow key={applicant.id} application={applicant} />
+                ))}
               </div>
-              {filteredApplicants.map((applicant) => (
-                <ApplicantRow key={applicant.id} application={applicant} />
-              ))}
-            </div>
-          ) : (
-            <div className="empty-state compact"><p>{searchStudent ? "No applicants match your search." : "No applicants yet."}</p></div>
-          )}
+            ) : (
+              <div className="empty-state compact"><p>{searchStudent ? "No applicants match your search." : "No applicants yet."}</p></div>
+            )
+          ) : null}
         </div>
 
         {adminToken && opportunityId ? (
-          <InterviewReportsPanel adminToken={adminToken} opportunityId={opportunityId} />
+          <>
+            <SheetImportPanel
+              adminToken={adminToken}
+              opportunityId={opportunityId}
+              onImported={onRefresh}
+            />
+            <InterviewReportsPanel adminToken={adminToken} opportunityId={opportunityId} />
+          </>
         ) : null}
       </section>
     </>
