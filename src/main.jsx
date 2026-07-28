@@ -21,6 +21,7 @@ import {
   LogOut,
   RefreshCw,
   ShieldCheck,
+  TrendingUp,
   Trophy,
   UserRound,
   UsersRound,
@@ -673,6 +674,7 @@ function PracticeBank({ token }) {
   const [error, setError] = useState("");
   const [includeScenario, setIncludeScenario] = useState(false);
   const [category, setCategory] = useState("");
+  const [company, setCompany] = useState("");
   const [difficulty, setDifficulty] = useState("");
   const [search, setSearch] = useState("");
 
@@ -682,6 +684,7 @@ function PracticeBank({ token }) {
     const params = new URLSearchParams();
     if (includeScenario) params.set("include_scenario", "true");
     if (category) params.set("category", category);
+    if (company) params.set("company", company);
     if (difficulty) params.set("difficulty", difficulty);
     if (search.trim()) params.set("search", search.trim());
     apiRequest(`/students/me/practice-questions?${params.toString()}`, { token })
@@ -691,7 +694,7 @@ function PracticeBank({ token }) {
     return () => {
       live = false;
     };
-  }, [token, includeScenario, category, difficulty, search]);
+  }, [token, includeScenario, category, company, difficulty, search]);
 
   const questions = data?.questions || [];
 
@@ -722,8 +725,14 @@ function PracticeBank({ token }) {
           value={search}
           onChange={(event) => setSearch(event.target.value)}
         />
+        <select className="sort-select" value={company} onChange={(event) => setCompany(event.target.value)}>
+          <option value="">All companies</option>
+          {(data?.companies || []).map((item) => (
+            <option key={item} value={item}>{item}</option>
+          ))}
+        </select>
         <select className="sort-select" value={category} onChange={(event) => setCategory(event.target.value)}>
-          <option value="">All topics</option>
+          <option value="">All tech stacks</option>
           {(data?.categories || []).map((item) => (
             <option key={item} value={item}>{item}</option>
           ))}
@@ -753,7 +762,7 @@ function PracticeBank({ token }) {
       {!loading && !questions.length ? (
         <div className="empty-state compact">
           <p>
-            {search || category || difficulty
+            {search || category || company || difficulty
               ? "No questions match these filters."
               : "No practice questions yet. They appear here as interviews get analysed."}
           </p>
@@ -800,9 +809,7 @@ function PracticeBank({ token }) {
   );
 }
 
-function StudentReportsView({ reports, loading, focusId, token }) {
-  const [tab, setTab] = useState("feedback");
-
+function StudentReportsView({ reports, loading, focusId }) {
   return (
     <section className="panel wide">
       <div className="panel-title">
@@ -810,40 +817,39 @@ function StudentReportsView({ reports, loading, focusId, token }) {
         <h2>Interview Feedback</h2>
       </div>
 
-      <div className="rsa-tabs">
-        <button type="button" className={tab === "feedback" ? "active" : ""} onClick={() => setTab("feedback")}>
-          My feedback ({reports.length})
-        </button>
-        <button type="button" className={tab === "practice" ? "active" : ""} onClick={() => setTab("practice")}>
-          Practice questions
-        </button>
-      </div>
-
-      {tab === "feedback" ? (
-        loading ? (
-          <PanelLoader />
-        ) : reports.length ? (
-          <>
-            <p className="rsa-hint">
-              Detailed feedback from your interviews, including what to improve before the next one.
-            </p>
-            <div className="rsa-reports">
-              {reports.map((report) => (
-                <StudentReportCard key={report.id} report={report} defaultOpen={report.id === focusId} />
-              ))}
-            </div>
-          </>
-        ) : (
-          <div className="empty-state">
-            <p>
-              No feedback published yet. After an interview, your feedback appears here once the
-              placement team has reviewed it.
-            </p>
+      {loading ? (
+        <PanelLoader />
+      ) : reports.length ? (
+        <>
+          <p className="rsa-hint">
+            Detailed feedback from your interviews, including what to improve before the next one.
+          </p>
+          <div className="rsa-reports">
+            {reports.map((report) => (
+              <StudentReportCard key={report.id} report={report} defaultOpen={report.id === focusId} />
+            ))}
           </div>
-        )
+        </>
       ) : (
-        <PracticeBank token={token} />
+        <div className="empty-state">
+          <p>
+            No feedback published yet. After an interview, your feedback appears here once the
+            placement team has reviewed it.
+          </p>
+        </div>
       )}
+    </section>
+  );
+}
+
+function StudentPracticeView({ token }) {
+  return (
+    <section className="panel wide">
+      <div className="panel-title">
+        <BookOpenCheck size={20} />
+        <h2>Practice Questions</h2>
+      </div>
+      <PracticeBank token={token} />
     </section>
   );
 }
@@ -852,10 +858,14 @@ function StudentDashboard({ student, token, onLogout, route = [], navigate = () 
   const [dashboard, setDashboard] = useState(null);
   const [dashboardError, setDashboardError] = useState("");
   const [loadingDashboard, setLoadingDashboard] = useState(true);
-  // #/student/feedback survives a refresh; anything else is the dashboard.
-  const view = route[1] === "feedback" ? "reports" : "dashboard";
+  // #/student/feedback and #/student/practice survive a refresh.
+  const view =
+    route[1] === "feedback" ? "reports" : route[1] === "practice" ? "practice" : "dashboard";
   const setView = useCallback(
-    (next) => navigate(["student", next === "reports" ? "feedback" : ""]),
+    (next) => {
+      const seg = next === "reports" ? "feedback" : next === "practice" ? "practice" : "";
+      navigate(["student", seg]);
+    },
     [navigate],
   );
   const [reports, setReports] = useState([]);
@@ -960,6 +970,13 @@ function StudentDashboard({ student, token, onLogout, route = [], navigate = () 
             <FileText size={18} /> Interview Feedback
             {reports.length ? <span className="nav-count">{reports.length}</span> : null}
           </button>
+          <button
+            type="button"
+            className={view === "practice" ? "active" : ""}
+            onClick={() => setView("practice")}
+          >
+            <BookOpenCheck size={18} /> Practice Questions
+          </button>
         </nav>
         <button className="ghost-button" onClick={onLogout}>
           <LogOut size={18} />
@@ -977,12 +994,9 @@ function StudentDashboard({ student, token, onLogout, route = [], navigate = () 
         </header>
 
         {view === "reports" ? (
-          <StudentReportsView
-            reports={reports}
-            loading={loadingReports}
-            focusId={focusReportId}
-            token={token}
-          />
+          <StudentReportsView reports={reports} loading={loadingReports} focusId={focusReportId} />
+        ) : view === "practice" ? (
+          <StudentPracticeView token={token} />
         ) : (
         <>
         <section className="stats-grid">
@@ -1083,9 +1097,10 @@ function PanelLoader() {
 }
 
 function statusClass(status) {
-  if (status === "shortlisted" || status === "hired") return "good";
-  if (status === "rejected" || status === "dropped" || status === "not_interested") return "bad";
-  if (status === "interview_scheduled" || status === "in_progress") return "warn";
+  const s = (status || "").toLowerCase();
+  if (["shortlisted", "hired", "selected", "joined", "offer_accepted"].includes(s)) return "good";
+  if (["rejected", "not_shortlisted", "dropped", "not_interested", "offer_rejected"].includes(s)) return "bad";
+  if (s.includes("interview") || s === "in_progress") return "warn";
   return "neutral";
 }
 
@@ -1143,6 +1158,15 @@ function ApplicationRow({ application, report, onOpenReport }) {
           <CalendarClock size={14} />
           {application.applied_at ? new Date(application.applied_at).toLocaleDateString() : "Date not added"}
         </span>
+        {application.screening_remark ? (
+          <span
+            className={`screening-note ${application.screening_decision === "shortlisted" ? "good" : ""}`}
+            title={application.screening_remark}
+          >
+            {application.screening_decision === "not_shortlisted" ? "Feedback: " : ""}
+            {application.screening_remark}
+          </span>
+        ) : null}
       </div>
       <div className="link-group">
         {links.length ? (
@@ -1177,7 +1201,14 @@ function AdminDashboard({ adminToken, onLogout, route = [], navigate = () => {} 
   const [students, setStudents] = useState([]);
   // Navigation lives in the URL: #/admin, #/admin/students,
   // #/admin/company/<id>[/opp/<id>]. A refresh therefore lands where you were.
-  const activeView = route[1] === "students" ? "students" : route[1] === "company" ? "company" : "overview";
+  const activeView =
+    route[1] === "students"
+      ? "students"
+      : route[1] === "analytics"
+        ? "analytics"
+        : route[1] === "company"
+          ? "company"
+          : "overview";
   const companyId = route[1] === "company" ? route[2] || null : null;
   const routeOppId = route[3] === "opp" ? route[4] || null : null;
   const [error, setError] = useState("");
@@ -1277,6 +1308,9 @@ function AdminDashboard({ adminToken, onLogout, route = [], navigate = () => {} 
           <button className={activeView === "students" ? "active" : ""} type="button" onClick={openStudentsView}>
             <UsersRound size={18} /> Students
           </button>
+          <button className={activeView === "analytics" ? "active" : ""} type="button" onClick={() => navigate(["admin", "analytics"])}>
+            <TrendingUp size={18} /> Analytics
+          </button>
         </nav>
         <button className="ghost-button" onClick={onLogout}>
           <LogOut size={18} />
@@ -1301,22 +1335,32 @@ function AdminDashboard({ adminToken, onLogout, route = [], navigate = () => {} 
         <header className="topbar">
           <div>
             <p className="eyebrow">Admin Dashboard</p>
-            <h1>{activeView === "students" ? "Students" : "Hiring Pipeline Overview"}</h1>
+            <h1>
+              {activeView === "students"
+                ? "Students"
+                : activeView === "analytics"
+                  ? "Analytics"
+                  : "Hiring Pipeline Overview"}
+            </h1>
           </div>
-          <button
-            className="icon-button"
-            type="button"
-            onClick={activeView === "students" ? loadStudents : loadDashboard}
-            disabled={loading || loadingStudents}
-            title="Refresh"
-          >
-            <RefreshCw className={loading || loadingStudents ? "spin" : ""} size={18} />
-          </button>
+          {activeView !== "analytics" ? (
+            <button
+              className="icon-button"
+              type="button"
+              onClick={activeView === "students" ? loadStudents : loadDashboard}
+              disabled={loading || loadingStudents}
+              title="Refresh"
+            >
+              <RefreshCw className={loading || loadingStudents ? "spin" : ""} size={18} />
+            </button>
+          ) : null}
         </header>
 
         {error ? <StatusMessage error={error} /> : null}
 
-        {activeView === "students" ? (
+        {activeView === "analytics" ? (
+          <AdminAnalyticsView adminToken={adminToken} />
+        ) : activeView === "students" ? (
           <AdminStudentsView students={students} loading={loadingStudents} />
         ) : (
           <>
@@ -1325,6 +1369,8 @@ function AdminDashboard({ adminToken, onLogout, route = [], navigate = () => {} 
               <Metric icon={<Building2 size={20} />} label="Companies" value={summary.total_companies ?? 0} />
               <Metric icon={<BriefcaseBusiness size={20} />} label="Opportunities" value={summary.total_opportunities ?? 0} />
             </section>
+
+            <AddCompaniesPanel adminToken={adminToken} onImported={loadDashboard} />
 
             <section className="content-grid admin-grid">
               <div className="panel wide">
@@ -1412,6 +1458,419 @@ function AdminDashboard({ adminToken, onLogout, route = [], navigate = () => {} 
         )}
       </section>
     </main>
+  );
+}
+
+/* ------------------------------ Analytics ------------------------------ */
+
+const STATUS_META = {
+  APPLIED: { label: "Applied", color: "#3b82f6" },
+  PROFILE_SHARED: { label: "Profile shared", color: "#6366f1" },
+  SHORTLISTED: { label: "Shortlisted", color: "#0f766e" },
+  NOT_SHORTLISTED: { label: "Not shortlisted", color: "#94a3b8" },
+  INTERVIEW_SCHEDULED: { label: "Interview scheduled", color: "#d97706" },
+  INTERVIEW_IN_PROGRESS: { label: "Interview in progress", color: "#f59e0b" },
+  SELECTED: { label: "Selected", color: "#15803d" },
+  JOINED: { label: "Joined", color: "#166534" },
+  OFFER_PENDING: { label: "Offer pending", color: "#0ea5e9" },
+  OFFER_RELEASED: { label: "Offer released", color: "#0ea5e9" },
+  OFFER_ACCEPTED: { label: "Offer accepted", color: "#15803d" },
+  OFFER_REJECTED: { label: "Offer rejected", color: "#dc2626" },
+  REJECTED: { label: "Rejected", color: "#dc2626" },
+  DROPPED: { label: "Dropped", color: "#94a3b8" },
+};
+
+function statusMeta(key) {
+  return STATUS_META[key] || { label: String(key || "Unknown").replace(/_/g, " "), color: "#64748b" };
+}
+
+function StatusChip({ status }) {
+  const meta = statusMeta(status);
+  return (
+    <span className="status-chip" style={{ color: meta.color, borderColor: meta.color }}>
+      {meta.label}
+    </span>
+  );
+}
+
+function fmt(value) {
+  return (value ?? 0).toLocaleString();
+}
+
+function pad2(n) {
+  return String(n).padStart(2, "0");
+}
+
+function toDateStr(d) {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+function shortDate(s) {
+  const [, m, d] = String(s).split("-").map(Number);
+  const mo = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][(m || 1) - 1];
+  return `${mo} ${d}`;
+}
+
+function presetRange(preset) {
+  const now = new Date();
+  if (preset === "last_month") {
+    const s = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const e = new Date(now.getFullYear(), now.getMonth(), 0);
+    return { start: toDateStr(s), end: toDateStr(e) };
+  }
+  if (preset === "last_30") {
+    const s = new Date(now);
+    s.setDate(s.getDate() - 29);
+    return { start: toDateStr(s), end: toDateStr(now) };
+  }
+  if (preset === "all_time") {
+    return { start: "2026-01-01", end: toDateStr(now) };
+  }
+  return { start: toDateStr(new Date(now.getFullYear(), now.getMonth(), 1)), end: toDateStr(now) };
+}
+
+function DateRangeControl({ preset, range, onPreset, onCustom }) {
+  const presets = [
+    ["this_month", "This month"],
+    ["last_month", "Last month"],
+    ["last_30", "Last 30 days"],
+    ["all_time", "All time"],
+  ];
+  return (
+    <div className="range-bar">
+      <div className="range-presets">
+        {presets.map(([key, label]) => (
+          <button key={key} type="button" className={preset === key ? "chip active" : "chip"} onClick={() => onPreset(key)}>
+            {label}
+          </button>
+        ))}
+      </div>
+      <div className="range-custom">
+        <CalendarClock size={15} />
+        <input type="date" value={range.start} max={range.end} onChange={(e) => onCustom({ ...range, start: e.target.value })} />
+        <span className="range-arrow">→</span>
+        <input type="date" value={range.end} min={range.start} onChange={(e) => onCustom({ ...range, end: e.target.value })} />
+      </div>
+    </div>
+  );
+}
+
+function KpiTile({ label, value, sub }) {
+  return (
+    <div className="kpi-tile">
+      <div className="kpi-value">{value}</div>
+      <div className="kpi-label">{label}</div>
+      {sub ? <div className="kpi-sub">{sub}</div> : null}
+    </div>
+  );
+}
+
+function BarList({ items, color = "#0f766e", total }) {
+  const max = Math.max(...items.map((i) => i.n), 1);
+  return (
+    <div className="barlist">
+      {items.map((it) => (
+        <div className="bar-row" key={it.key}>
+          <span className="bar-label" title={it.label}>{it.label}</span>
+          <div className="bar-track">
+            <div className="bar-fill" style={{ width: `${Math.max((it.n / max) * 100, it.n ? 2 : 0)}%`, background: it.color || color }} />
+          </div>
+          <span className="bar-val">
+            {fmt(it.n)}
+            {total ? <em>{Math.round((it.n / total) * 100)}%</em> : null}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Histogram({ buckets }) {
+  const max = Math.max(...buckets.map((b) => b.n), 1);
+  return (
+    <div className="histogram">
+      {buckets.map((b) => (
+        <div className="hist-col" key={b.label}>
+          <span className="hist-count">{b.n}</span>
+          <div className="hist-track">
+            <div
+              className="hist-bar"
+              style={{ height: `${Math.max((b.n / max) * 100, b.n ? 3 : 0)}%` }}
+              title={`${b.n} students applied to ${b.label} ${b.label === "1" ? "opportunity" : "opportunities"}`}
+            />
+          </div>
+          <span className="hist-x">{b.label}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TrendChart({ points }) {
+  const [hoverIdx, setHoverIdx] = useState(null);
+  if (!points.length) return <p className="chart-empty">No applications in this range.</p>;
+  const W = 720, H = 220, padL = 34, padR = 12, padT = 14, padB = 26;
+  const maxA = Math.max(...points.map((p) => p.apps), 1);
+  const n = points.length;
+  const innerW = W - padL - padR;
+  const px = (i) => padL + (n === 1 ? innerW / 2 : (i * innerW) / (n - 1));
+  const py = (v) => padT + (1 - v / maxA) * (H - padT - padB);
+  const linePath = points.map((p, i) => `${i ? "L" : "M"}${px(i).toFixed(1)},${py(p.apps).toFixed(1)}`).join(" ");
+  const areaPath = `${linePath} L${px(n - 1).toFixed(1)},${(H - padB).toFixed(1)} L${px(0).toFixed(1)},${(H - padB).toFixed(1)} Z`;
+  const onMove = (e) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const mx = ((e.clientX - rect.left) / rect.width) * W;
+    const i = Math.max(0, Math.min(n - 1, Math.round(((mx - padL) / innerW) * (n - 1))));
+    setHoverIdx(i);
+  };
+  const hp = hoverIdx != null ? points[hoverIdx] : null;
+  return (
+    <div className="trend-wrap">
+      {hp ? (
+        <div className="trend-tip">
+          <strong>{shortDate(hp.date)}</strong> — {hp.apps} applications · {hp.students} students
+        </div>
+      ) : (
+        <div className="trend-tip muted">Hover the line for daily detail</div>
+      )}
+      <svg viewBox={`0 0 ${W} ${H}`} className="trend-svg" onMouseMove={onMove} onMouseLeave={() => setHoverIdx(null)}>
+        {[0, maxA].map((v) => (
+          <g key={v}>
+            <line x1={padL} x2={W - padR} y1={py(v)} y2={py(v)} className="grid-line" />
+            <text x={padL - 6} y={py(v) + 3} className="axis-text" textAnchor="end">{v}</text>
+          </g>
+        ))}
+        <path d={areaPath} className="trend-area" />
+        <path d={linePath} className="trend-line" />
+        {points.map((p, i) => (n > 45 ? null : <circle key={i} cx={px(i)} cy={py(p.apps)} r={2.4} className="trend-dot" />))}
+        <text x={px(0)} y={H - 8} className="axis-text" textAnchor="start">{shortDate(points[0].date)}</text>
+        {n > 1 ? <text x={px(n - 1)} y={H - 8} className="axis-text" textAnchor="end">{shortDate(points[n - 1].date)}</text> : null}
+        {hp ? (
+          <g>
+            <line x1={px(hoverIdx)} x2={px(hoverIdx)} y1={padT} y2={H - padB} className="hover-line" />
+            <circle cx={px(hoverIdx)} cy={py(hp.apps)} r={4} className="hover-dot" />
+          </g>
+        ) : null}
+      </svg>
+    </div>
+  );
+}
+
+function AdminAnalyticsView({ adminToken }) {
+  const [preset, setPreset] = useState("this_month");
+  const [range, setRange] = useState(() => presetRange("this_month"));
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [openStudent, setOpenStudent] = useState(null);
+  const [openCategory, setOpenCategory] = useState(null);
+
+  useEffect(() => {
+    let live = true;
+    setLoading(true);
+    setError("");
+    setOpenStudent(null);
+    setOpenCategory(null);
+    const q = new URLSearchParams();
+    if (range.start) q.set("start", range.start);
+    if (range.end) q.set("end", range.end);
+    apiRequest(`/admin/analytics?${q.toString()}`, { adminToken })
+      .then((d) => live && setData(d))
+      .catch((e) => live && setError(e.message))
+      .finally(() => live && setLoading(false));
+    return () => {
+      live = false;
+    };
+  }, [range.start, range.end, adminToken]);
+
+  const kpis = data?.kpis || {};
+  const statusItems = (data?.status || []).map((s) => ({ key: s.key, label: statusMeta(s.key).label, color: statusMeta(s.key).color, n: s.n }));
+  const funnelItems = (data?.funnel || []).map((f) => ({ key: f.key, label: f.key, n: f.n }));
+  const companyItems = (data?.top_companies || []).map((c, i) => ({ key: `${c.name}-${i}`, label: c.name, n: c.n }));
+
+  return (
+    <div className="analytics-view">
+      <DateRangeControl
+        preset={preset}
+        range={range}
+        onPreset={(p) => {
+          setPreset(p);
+          setRange(presetRange(p));
+        }}
+        onCustom={(r) => {
+          setPreset("custom");
+          setRange(r);
+        }}
+      />
+
+      {error ? <StatusMessage error={error} /> : null}
+
+      {loading || !data ? (
+        <PanelLoader />
+      ) : (
+        <>
+          <section className="kpi-grid">
+            <KpiTile label="Applications" value={fmt(kpis.applications)} sub={`${data.daily.length} active day(s)`} />
+            <KpiTile label="Students applied" value={fmt(kpis.students)} sub={`avg ${data.apps_per_student.avg} openings each`} />
+            <KpiTile label="Companies" value={fmt(kpis.companies)} sub={`${fmt(kpis.opportunities)} openings`} />
+            <KpiTile label="Interested" value={fmt(kpis.interested)} sub={`${kpis.interest_rate}% of applications`} />
+            <KpiTile label="Shortlisted" value={fmt(kpis.shortlisted)} sub={`${kpis.shortlist_rate}% of interested`} />
+            <KpiTile label="Selected" value={fmt(kpis.selected)} />
+            <KpiTile label="New students" value={fmt(kpis.new_students)} sub="onboarded in range" />
+            <KpiTile label="New openings" value={fmt(kpis.new_opportunities)} sub="received in range" />
+          </section>
+
+          <section className="panel wide">
+            <div className="panel-title">
+              <TrendingUp size={18} />
+              <h2>Applications over time</h2>
+            </div>
+            <TrendChart points={data.daily} />
+          </section>
+
+          <section className="analytics-2col">
+            <div className="panel">
+              <div className="panel-title">
+                <BarChart3 size={18} />
+                <h2>Pipeline funnel</h2>
+              </div>
+              <BarList items={funnelItems} total={kpis.applications} />
+            </div>
+            <div className="panel">
+              <div className="panel-title">
+                <FileText size={18} />
+                <h2>Status breakdown</h2>
+              </div>
+              {statusItems.length ? <BarList items={statusItems} total={kpis.applications} /> : <p className="chart-empty">No data.</p>}
+            </div>
+          </section>
+
+          <section className="analytics-2col">
+            <div className="panel">
+              <div className="panel-title">
+                <UsersRound size={18} />
+                <h2>Opportunities per student</h2>
+              </div>
+              <Histogram buckets={data.apps_per_student.buckets} />
+              <p className="chart-note">
+                Avg <strong>{data.apps_per_student.avg}</strong> openings per student · most active applied to <strong>{data.apps_per_student.max}</strong>
+              </p>
+            </div>
+            <div className="panel">
+              <div className="panel-title">
+                <Building2 size={18} />
+                <h2>Top companies by applications</h2>
+              </div>
+              {companyItems.length ? <BarList items={companyItems} /> : <p className="chart-empty">No data.</p>}
+            </div>
+          </section>
+
+          <section className="panel wide">
+            <div className="panel-title">
+              <Sparkles size={18} />
+              <h2>Opportunities by role</h2>
+            </div>
+            {data.role_categories?.length ? (
+              <div className="role-cats">
+                {data.role_categories.map((c) => (
+                  <div className="role-cat" key={c.category}>
+                    <button
+                      type="button"
+                      className={`role-cat-head ${openCategory === c.category ? "is-open" : ""}`}
+                      onClick={() => setOpenCategory(openCategory === c.category ? null : c.category)}
+                    >
+                      <ChevronRight size={16} className="role-caret" />
+                      <span className="role-cat-name">{c.category}</span>
+                      <span className="role-cat-stats">
+                        <b>{c.opportunities}</b> openings · <b>{c.applications}</b> apps · <b>{c.shortlisted}</b> shortlisted
+                      </span>
+                    </button>
+                    {openCategory === c.category ? (
+                      <div className="role-cat-body">
+                        {c.companies.map((co, idx) => (
+                          <div className="expand-row" key={idx}>
+                            <div className="expand-company">
+                              <strong>{co.company}</strong>
+                              <span>{co.role}</span>
+                            </div>
+                            <div className="role-cat-counts">
+                              <span className="mini-count">{co.apps} apps</span>
+                              <span className="mini-count good">{co.shortlisted} shortlisted</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="chart-empty">No data.</p>
+            )}
+          </section>
+
+          <section className="panel wide">
+            <div className="panel-title">
+              <Trophy size={18} />
+              <h2>Most active students</h2>
+              <span className="title-hint">click a row for their companies</span>
+            </div>
+            {data.top_students.length ? (
+              <div className="admin-table analytics-table">
+                <div className="admin-head">
+                  <span>Student</span>
+                  <span>Applied</span>
+                  <span>Shortlisted</span>
+                </div>
+                {data.top_students.map((s, i) => (
+                  <React.Fragment key={i}>
+                    <div
+                      className={`admin-row analytics-student ${openStudent === i ? "is-open" : ""}`}
+                      onClick={() => setOpenStudent(openStudent === i ? null : i)}
+                    >
+                      <div className="student-name-cell">
+                        <ChevronRight size={15} className="row-caret" />
+                        <strong>{s.name}</strong>
+                      </div>
+                      <div><span className="mini-count">{s.apps}</span></div>
+                      <div><span className="mini-count good">{s.shortlisted}</span></div>
+                    </div>
+                    {openStudent === i ? (
+                      <div className="student-expand">
+                        <div className="student-expand-head">
+                          <span>Companies applied in this range</span>
+                        </div>
+                        {s.applications?.length ? (
+                          <div className="expand-list">
+                            {s.applications.map((a, j) => (
+                              <div className="expand-row" key={j}>
+                                <div className="expand-company">
+                                  <strong>{a.company}</strong>
+                                  <span>{a.role}</span>
+                                </div>
+                                <div className="expand-status">
+                                  <StatusChip status={a.status} />
+                                  <span className="date-line"><CalendarClock size={13} />{formatDate(a.applied_at)}</span>
+                                </div>
+                                <span className="cat-tag">{a.category}</span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="expand-empty">No applications in this range.</p>
+                        )}
+                      </div>
+                    ) : null}
+                  </React.Fragment>
+                ))}
+              </div>
+            ) : (
+              <p className="chart-empty">No data.</p>
+            )}
+          </section>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -1632,6 +2091,18 @@ const sheetApi = {
       method: "POST",
       adminToken,
       body: { raw_text: rawText, confirm: true },
+    }),
+  sync: (adminToken, opportunityId, kind, confirm, force = false, replace = false) =>
+    apiRequest(`/admin/opportunities/${opportunityId}/sync/${kind}`, {
+      method: "POST",
+      adminToken,
+      body: { confirm, force, replace },
+    }),
+  masterFetch: (adminToken, url, confirm) =>
+    apiRequest("/admin/companies/import/fetch", {
+      method: "POST",
+      adminToken,
+      body: { url, confirm },
     }),
 };
 
@@ -1975,10 +2446,14 @@ function QuestionsPanel({ questions }) {
   );
 }
 
-/* --- Paste a response / shortlist sheet for this opening ----------- */
-function SheetImportPanel({ adminToken, opportunityId, onImported }) {
-  const [kind, setKind] = useState("responses");
+/* --- Add companies: paste rows from the master tracker ------------- */
+const MASTER_URL_KEY = "rsa_master_sheet_url";
+
+function AddCompaniesPanel({ adminToken, onImported }) {
+  const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
+  const [url, setUrl] = useState(() => localStorage.getItem(MASTER_URL_KEY) || "");
+  const [fromUrl, setFromUrl] = useState(false); // whether the current preview came from a URL fetch
   const [preview, setPreview] = useState(null);
   const [applied, setApplied] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -1990,10 +2465,305 @@ function SheetImportPanel({ adminToken, opportunityId, onImported }) {
     setError("");
   }
 
+  // Import from pasted text.
+  async function run(confirm) {
+    setBusy(true);
+    setError("");
+    setFromUrl(false);
+    try {
+      const result = await apiRequest("/admin/companies/import", {
+        method: "POST",
+        adminToken,
+        body: { raw_text: text, confirm },
+      });
+      if (confirm) {
+        setApplied(result);
+        setPreview(null);
+        setText("");
+        onImported?.();
+      } else {
+        setPreview(result);
+        setApplied(null);
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Import by fetching the master sheet URL.
+  async function runUrl(confirm) {
+    setBusy(true);
+    setError("");
+    setFromUrl(true);
+    try {
+      const result = await sheetApi.masterFetch(adminToken, url.trim(), confirm);
+      localStorage.setItem(MASTER_URL_KEY, url.trim());
+      if (confirm) {
+        setApplied(result);
+        setPreview(null);
+        onImported?.();
+      } else {
+        setPreview(result);
+        setApplied(null);
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const counts = preview?.counts || {};
+
+  return (
+    <div className="panel wide">
+      <button
+        type="button"
+        className="panel-title collapsible"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+      >
+        <Building2 size={20} />
+        <h2>Add companies</h2>
+        <span className="panel-toggle">{open ? <ChevronUp size={18} /> : <ChevronDown size={18} />}</span>
+      </button>
+
+      {open ? (
+        <>
+          <p className="rsa-hint">
+            Pull the company master tracker from its Google Sheets link, or paste rows below. Each
+            row creates a company and its opening, or updates them if they already exist.
+          </p>
+
+          {!preview && !applied ? (
+            <div className="rsa-master-url">
+              <input
+                className="search-input"
+                placeholder="Master sheet link (https://docs.google.com/spreadsheets/...)"
+                value={url}
+                onChange={(event) => setUrl(event.target.value)}
+              />
+              <button
+                className="primary-button"
+                type="button"
+                disabled={!url.trim() || busy}
+                onClick={() => runUrl(false)}
+              >
+                {busy && fromUrl ? <Loader2 className="spin" size={18} /> : <RefreshCw size={18} />}
+                Pull from sheet
+              </button>
+            </div>
+          ) : null}
+
+          {error ? <StatusMessage error={error} /> : null}
+
+          {applied ? (
+            <div className="status success" style={{ marginBottom: 12 }}>
+              <BadgeCheck size={18} />
+              <span>
+                Done — {applied.counts.companies_new} new compan
+                {applied.counts.companies_new === 1 ? "y" : "ies"},{" "}
+                {applied.counts.opportunities_to_create} opening(s) created,{" "}
+                {applied.counts.opportunities_to_update} updated.
+              </span>
+            </div>
+          ) : null}
+
+          {!preview ? (
+            <>
+              <textarea
+                className="rsa-textarea"
+                value={text}
+                onChange={(event) => setText(event.target.value)}
+                spellCheck={false}
+                placeholder={"Opportunity Received On\tReceived Time\tCompany Name\t…\tRole\t…\n3-Mar-2026\t11:21\tAcme AI\t…\tFrontend Intern\t…"}
+              />
+              <div className="rsa-actions">
+                <span className="muted">{text.trim() ? `${text.trim().split("\n").length} line(s)` : "Empty"}</span>
+                <button className="primary-button" type="button" disabled={!text.trim() || busy} onClick={() => run(false)}>
+                  {busy ? <Loader2 className="spin" size={18} /> : <Eye size={18} />}
+                  Preview
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="rsa-detected">
+                <div><span>Rows</span><strong>{counts.rows ?? 0}</strong></div>
+                <div><span>New companies</span><strong>{counts.companies_new ?? 0}</strong></div>
+                <div><span>Openings to create</span><strong>{counts.opportunities_to_create ?? 0}</strong></div>
+                <div><span>Openings to update</span><strong>{counts.opportunities_to_update ?? 0}</strong></div>
+                {counts.skipped ? <div><span>Skipped</span><strong>{counts.skipped}</strong></div> : null}
+              </div>
+
+              {(() => {
+                const changed = (preview.rows || []).filter(
+                  (r) => r.response_links_changed || r.company_links_changed,
+                );
+                return changed.length ? (
+                  <div className="rsa-warning rsa-changed" style={{ marginBottom: 12 }}>
+                    <RefreshCw size={16} />
+                    <div>
+                      <strong>Sheet links changed — after confirming, open these and Sync from sheets:</strong>
+                      <ul>
+                        {changed.map((r) => (
+                          <li key={r.row}>
+                            {r.company} · {r.role}
+                            {r.received_on ? ` · ${r.received_on}` : ""}
+                            {" — "}
+                            {[r.response_links_changed ? "response" : null, r.company_links_changed ? "shortlist" : null]
+                              .filter(Boolean)
+                              .join(" & ")}{" "}
+                            link
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                ) : null;
+              })()}
+
+              {(() => {
+                const skips = (preview.rows || []).filter((r) => r.action === "skip");
+                return skips.length ? (
+                  <div className="rsa-warning" style={{ marginBottom: 12 }}>
+                    <TriangleAlert size={16} />
+                    <span>
+                      {skips.length} row(s) will be skipped as malformed (e.g. row {skips[0].row}:
+                      &quot;{skips[0].company}&quot;). These look like shifted rows in the sheet — fix
+                      them there if they should import.
+                    </span>
+                  </div>
+                ) : null;
+              })()}
+
+              <div className="rsa-preview-table">
+                {(preview.rows || []).map((row) => (
+                  <div className="rsa-preview-row" key={row.row}>
+                    <span className="muted">{row.row}</span>
+                    <div>
+                      <strong>{row.company || "(no company)"}</strong>
+                      <span>{row.role}{row.received_on ? ` · ${row.received_on}` : ""}</span>
+                    </div>
+                    <span className={`status-pill ${row.action === "skip" ? "bad" : row.action.includes("create") ? "neutral" : "good"}`}>
+                      {row.action.replaceAll("_", " ").replace("opportunity", "opening")}
+                    </span>
+                    <span className="muted">{row.company_new ? "new company" : row.reason || ""}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="rsa-actions">
+                <button className="back-button" type="button" onClick={reset} disabled={busy}>
+                  <ArrowLeft size={16} /> Back
+                </button>
+                <button
+                  className="primary-button"
+                  type="button"
+                  onClick={() => (fromUrl ? runUrl(true) : run(true))}
+                  disabled={busy}
+                >
+                  {busy ? <Loader2 className="spin" size={18} /> : <BadgeCheck size={18} />}
+                  Confirm
+                </button>
+              </div>
+            </>
+          )}
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+/* Shows which sheet column mapped to each field, so a format change is
+   visible instead of silently importing nothing. */
+function ColumnMapping({ mapping }) {
+  const FIELDS = [
+    ["name", "Name"],
+    ["email", "Email"],
+    ["phone", "Phone"],
+    ["uid", "Student ID"],
+    ["resume", "Resume"],
+    ["interested", "Interested"],
+  ];
+  return (
+    <div className="rsa-mapping">
+      <strong>Detected columns</strong>
+      <div className="rsa-mapping-grid">
+        {FIELDS.map(([key, label]) => (
+          <div className="rsa-mapping-row" key={key}>
+            <span className="rsa-mapping-field">{label}</span>
+            <span className="rsa-mapping-arrow">←</span>
+            {mapping[key] ? (
+              <span className="rsa-mapping-col">{mapping[key]}</span>
+            ) : (
+              <span className="rsa-mapping-none">not found</span>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// A response/shortlist sheet link that changed after its last import points at
+// a corrected sheet the admin should pull.
+function changedSinceImport(changedAt, importedAt) {
+  if (!changedAt) return false;
+  if (!importedAt) return true;
+  return new Date(changedAt).getTime() > new Date(importedAt).getTime();
+}
+
+/* --- Paste a response / shortlist sheet for this opening ----------- */
+function SheetImportPanel({ adminToken, opportunityId, opportunity, onImported }) {
+  const [kind, setKind] = useState("responses");
+  const [text, setText] = useState("");
+  const [preview, setPreview] = useState(null);
+  const [applied, setApplied] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  // The guided fetch-from-sheet flow: responses first, then shortlist, so the
+  // shortlist can match against the students the responses just created.
+  const [syncStep, setSyncStep] = useState(null); // null | "responses" | "shortlist"
+  const [skipped, setSkipped] = useState(null); // {kind, already_imported_at} when already extracted
+  // Replace mode (responses only): drop candidates left over from a wrong sheet.
+  const [replace, setReplace] = useState(false);
+
+  function reset() {
+    setPreview(null);
+    setApplied(null);
+    setSkipped(null);
+    setError("");
+  }
+
   function switchKind(next) {
     setKind(next);
     setText("");
+    setSyncStep(null);
+    setReplace(false);
     reset();
+  }
+
+  // A sync preview returns mode:"skipped" when the opening was already
+  // extracted; show the Force option instead of a preview.
+  async function syncPreview(step, force = false, replaceArg = replace) {
+    setBusy(true);
+    setError("");
+    setPreview(null);
+    setSkipped(null);
+    try {
+      // Replace only makes sense for the responses step.
+      const useReplace = step === "responses" ? replaceArg : false;
+      const result = await sheetApi.sync(adminToken, opportunityId, step, false, force, useReplace);
+      if (result.mode === "skipped") setSkipped(result);
+      else setPreview(result);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function handlePreview() {
@@ -2024,28 +2794,125 @@ function SheetImportPanel({ adminToken, opportunityId, onImported }) {
     }
   }
 
+  function startSync() {
+    reset();
+    setReplace(false);
+    setSyncStep("responses");
+    setKind("responses");
+    syncPreview("responses");
+  }
+
+  async function syncConfirm() {
+    setBusy(true);
+    setError("");
+    try {
+      // already previewed -> force apply; carry the replace choice on responses
+      await sheetApi.sync(adminToken, opportunityId, syncStep, true, true, syncStep === "responses" ? replace : false);
+      onImported?.();
+      if (syncStep === "responses") {
+        setSyncStep("shortlist");
+        setKind("shortlist");
+        await syncPreview("shortlist");
+      } else {
+        setApplied({ counts: {}, synced: true });
+        setPreview(null);
+        setSkipped(null);
+        setSyncStep(null);
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function skipSyncStep() {
+    if (syncStep === "responses") {
+      setSyncStep("shortlist");
+      setKind("shortlist");
+      await syncPreview("shortlist");
+    } else {
+      cancelSync();
+    }
+  }
+
+  function cancelSync() {
+    setSyncStep(null);
+    setReplace(false);
+    reset();
+  }
+
+  // Re-preview the responses step with replace toggled on/off.
+  function toggleReplace(next) {
+    setReplace(next);
+    if (syncStep === "responses") syncPreview("responses", false, next);
+  }
+
   const counts = preview?.counts || {};
   const problems = (preview?.rows || []).filter((row) => row.action === "skip");
+  const inSync = Boolean(syncStep);
 
   return (
     <div className="panel wide">
       <div className="panel-title">
         <Upload size={20} />
         <h2>Import sheet data</h2>
+        {!inSync && !preview ? (
+          <button type="button" className="rsa-sync-btn" onClick={startSync} disabled={busy}>
+            {busy ? <Loader2 className="spin" size={15} /> : <RefreshCw size={15} />}
+            Sync from sheets
+          </button>
+        ) : null}
       </div>
       <p className="rsa-hint">
-        For sheets that couldn&apos;t be downloaded. Paste straight from Google Sheets — you&apos;ll see
-        exactly what will change before anything is saved.
+        Pull the response and shortlist sheets straight from Google with <strong>Sync from sheets</strong>,
+        or switch to a tab and paste. Either way you preview before anything is saved.
       </p>
 
-      <div className="rsa-tabs">
-        <button type="button" className={kind === "responses" ? "active" : ""} onClick={() => switchKind("responses")}>
-          Student responses
-        </button>
-        <button type="button" className={kind === "shortlist" ? "active" : ""} onClick={() => switchKind("shortlist")}>
-          Shortlist
-        </button>
-      </div>
+      {[
+        {
+          label: "Response sheet",
+          changed: changedSinceImport(opportunity?.response_sheet_changed_at, opportunity?.responses_imported_at),
+          changedAt: opportunity?.response_sheet_changed_at,
+          importedAt: opportunity?.responses_imported_at,
+        },
+        {
+          label: "Shortlist sheet",
+          changed: changedSinceImport(opportunity?.company_sheet_changed_at, opportunity?.shortlist_imported_at),
+          changedAt: opportunity?.company_sheet_changed_at,
+          importedAt: opportunity?.shortlist_imported_at,
+        },
+      ]
+        .filter((item) => item.changed)
+        .map((item) => (
+          <div className="rsa-warning" key={item.label} style={{ marginBottom: 10 }}>
+            <RefreshCw size={16} />
+            <span>
+              {item.label} link changed on {formatDate(item.changedAt)}
+              {item.importedAt ? ` (last imported ${formatDate(item.importedAt)})` : ""}. Sync from
+              sheets to pull the updated candidates.
+            </span>
+          </div>
+        ))}
+
+      {inSync ? (
+        <div className="rsa-sync-steps">
+          <span className={syncStep === "responses" ? "on" : "done"}>1 · Responses</span>
+          <span className="rsa-sync-arrow">→</span>
+          <span className={syncStep === "shortlist" ? "on" : ""}>2 · Shortlist</span>
+        </div>
+      ) : null}
+
+      {!inSync ? (
+        <div className="rsa-tabs">
+          <button type="button" className={kind === "responses" ? "active" : ""} onClick={() => switchKind("responses")}>
+            Student responses
+          </button>
+          <button type="button" className={kind === "shortlist" ? "active" : ""} onClick={() => switchKind("shortlist")}>
+            Shortlist
+          </button>
+        </div>
+      ) : null}
 
       {error ? <StatusMessage error={error} /> : null}
 
@@ -2053,18 +2920,42 @@ function SheetImportPanel({ adminToken, opportunityId, onImported }) {
         <div className="status success" style={{ marginBottom: 12 }}>
           <BadgeCheck size={18} />
           <span>
-            Imported {applied.counts.rows} row(s):{" "}
-            {kind === "responses"
-              ? `${applied.counts.applications_to_create} created, ${applied.counts.applications_to_update} updated, ${applied.counts.students_to_create} new students`
-              : `${applied.counts.applications_to_mark} marked shortlisted, ${applied.counts.applications_to_create} created`}
-            {applied.counts.status_preserved
-              ? ` · ${applied.counts.status_preserved} kept their existing status`
-              : ""}
+            {applied.synced
+              ? "Synced from Google Sheets."
+              : `Imported ${applied.counts.rows} row(s): ${
+                  kind === "responses"
+                    ? `${applied.counts.applications_to_create} created, ${applied.counts.applications_to_update} updated, ${applied.counts.students_to_create} new students`
+                    : `${applied.counts.applications_to_mark} marked shortlisted`
+                }${applied.counts.status_preserved ? ` · ${applied.counts.status_preserved} kept their existing status` : ""}`}
           </span>
         </div>
       ) : null}
 
-      {!preview ? (
+      {skipped ? (
+        <div className="rsa-skip-banner">
+          <ShieldCheck size={18} />
+          <div className="rsa-skip-text">
+            <strong>Already imported</strong>
+            <p>
+              {skipped.kind === "responses" ? "Responses were" : "The shortlist was"} already imported
+              for this opening{skipped.already_imported_at ? ` on ${formatDate(skipped.already_imported_at)}` : ""}.
+              Force only if you fixed a wrong or no-access sheet URL.
+            </p>
+          </div>
+          <div className="rsa-skip-actions">
+            <button type="button" className="back-button" onClick={() => syncPreview(syncStep, true)} disabled={busy}>
+              <RefreshCw size={15} /> Force re-import
+            </button>
+            <button type="button" className="primary-button" onClick={skipSyncStep} disabled={busy}>
+              {syncStep === "responses" ? "Skip to shortlist" : "Finish"}
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {busy && !preview && !skipped ? <PanelLoader /> : null}
+
+      {!preview && !inSync ? (
         <>
           <textarea
             className="rsa-textarea"
@@ -2087,24 +2978,91 @@ function SheetImportPanel({ adminToken, opportunityId, onImported }) {
             </button>
           </div>
         </>
-      ) : (
+      ) : null}
+
+      {preview?.blocked ? (
         <>
+          <div className="rsa-warning" style={{ marginBottom: 12 }}>
+            <TriangleAlert size={16} />
+            <span>{preview.message}</span>
+          </div>
+          {preview.column_mapping ? <ColumnMapping mapping={preview.column_mapping} /> : null}
+          {preview.detected_headers?.length ? (
+            <p className="muted" style={{ marginTop: 10 }}>
+              Columns found in the sheet: {preview.detected_headers.join(", ")}
+            </p>
+          ) : null}
+          <div className="rsa-actions" style={{ marginTop: 14 }}>
+            <button className="back-button" type="button" onClick={inSync ? cancelSync : reset}>
+              <ArrowLeft size={16} /> Back
+            </button>
+          </div>
+        </>
+      ) : preview ? (
+        <>
+          {preview.column_mapping ? <ColumnMapping mapping={preview.column_mapping} /> : null}
+
           <div className="rsa-detected">
             <div><span>Rows read</span><strong>{counts.rows ?? 0}</strong></div>
-            <div>
-              <span>{kind === "responses" ? "Applications to create" : "To mark shortlisted"}</span>
-              <strong>{kind === "responses" ? counts.applications_to_create ?? 0 : counts.applications_to_mark ?? 0}</strong>
-            </div>
-            <div>
-              <span>{kind === "responses" ? "To update" : "New applications"}</span>
-              <strong>{kind === "responses" ? counts.applications_to_update ?? 0 : counts.applications_to_create ?? 0}</strong>
-            </div>
             {kind === "responses" ? (
-              <div><span>New students</span><strong>{counts.students_to_create ?? 0}</strong></div>
+              <>
+                <div><span>Applications to create</span><strong>{counts.applications_to_create ?? 0}</strong></div>
+                <div><span>To update</span><strong>{counts.applications_to_update ?? 0}</strong></div>
+                <div><span>New students</span><strong>{counts.students_to_create ?? 0}</strong></div>
+              </>
+            ) : preview.has_remarks ? (
+              <>
+                <div><span>Shortlisted</span><strong>{counts.shortlisted ?? 0}</strong></div>
+                <div><span>Not shortlisted</span><strong>{counts.not_shortlisted ?? 0}</strong></div>
+                <div><span>Skipped</span><strong>{counts.unmatched ?? 0}</strong></div>
+              </>
             ) : (
-              <div><span>Unmatched (skipped)</span><strong>{counts.unmatched ?? 0}</strong></div>
+              <>
+                <div><span>To mark shortlisted</span><strong>{counts.applications_to_mark ?? 0}</strong></div>
+                <div><span>Matched by name</span><strong>{counts.matched_by_name ?? 0}</strong></div>
+                <div>
+                  <span>Not applied (skipped)</span>
+                  <strong>{(counts.unmatched ?? 0) + (counts.ambiguous ?? 0)}</strong>
+                </div>
+              </>
             )}
           </div>
+
+          {kind === "responses" && inSync ? (
+            <label className="rsa-replace-toggle">
+              <input
+                type="checkbox"
+                checked={replace}
+                onChange={(event) => toggleReplace(event.target.checked)}
+                disabled={busy}
+              />
+              <span>
+                <strong>Replace candidates</strong> — remove applicants who aren&apos;t in this sheet
+                (leftovers from an old or wrong sheet), including shortlisted ones, since they never
+                really applied. All removals are backed up first. Only already-hired candidates
+                (selected / offer / joined) are kept and flagged for review.
+              </span>
+            </label>
+          ) : null}
+
+          {replace && (counts.stale_removed || counts.stale_flagged) ? (
+            <div className="rsa-warning" style={{ marginBottom: 10 }}>
+              <TriangleAlert size={16} />
+              <span>
+                {counts.stale_removed || 0} stale candidate(s) will be removed (backed up first)
+                {counts.stale_flagged
+                  ? `, and ${counts.stale_flagged} already-hired candidate(s) will be flagged for review, not removed`
+                  : ""}
+                .
+              </span>
+            </div>
+          ) : null}
+
+          {preview.has_remarks && counts.selected_elsewhere ? (
+            <p className="muted" style={{ marginBottom: 10 }}>
+              {counts.selected_elsewhere} marked selected elsewhere (dropped).
+            </p>
+          ) : null}
 
           {counts.status_preserved ? (
             <div className="rsa-warning" style={{ marginBottom: 10 }}>
@@ -2130,9 +3088,9 @@ function SheetImportPanel({ adminToken, opportunityId, onImported }) {
             <div className="rsa-warning" style={{ marginBottom: 10 }}>
               <TriangleAlert size={16} />
               <span>
-                {counts.unmatched} row(s) don&apos;t match anyone who applied to this opening and will
-                be skipped. Shortlist imports never create students — import their response sheet
-                first.
+                {counts.unmatched} shortlisted name(s) never applied to this opening, so there is
+                nothing to mark and they will be skipped. If they did apply, import that response
+                sheet first and run this again.
               </span>
             </div>
           ) : null}
@@ -2180,40 +3138,73 @@ function SheetImportPanel({ adminToken, opportunityId, onImported }) {
 
           <h3 className="detail-subhead">What will happen</h3>
           <div className="rsa-preview-table">
-            {(preview.rows || []).slice(0, 60).map((row) => (
-              <div className="rsa-preview-row" key={row.row}>
+            {(preview.rows || []).slice(0, 70).map((row, idx) => (
+              <div className="rsa-preview-row" key={`${row.row}-${row.email || row.name || idx}`}>
                 <span className="muted">{row.row}</span>
                 <div>
                   <strong>{row.name || "(no name)"}</strong>
                   <span>{row.email || row.phone || "no contact"}</span>
                 </div>
-                <span className={`status-pill ${row.action === "skip" ? "bad" : row.action.includes("create") ? "neutral" : "good"}`}>
+                <span
+                  className={`status-pill ${
+                    row.action === "skip" || row.action === "not_shortlisted" || row.action === "remove"
+                      ? "bad"
+                      : row.action === "selected_elsewhere" || row.action === "needs_review"
+                        ? "warn"
+                        : row.action.includes("create")
+                          ? "neutral"
+                          : "good"
+                  }`}
+                >
                   {row.action.replaceAll("_", " ")}
                 </span>
                 <span className="muted">
                   {row.matched_via === "name" ? <em>matched by name · </em> : null}
-                  {row.status_preserved_from ? `keeps ${row.status_preserved_from}` : row.status || row.willing_to_join || ""}
+                  {row.action === "remove" || row.action === "needs_review"
+                    ? row.reason
+                    : row.remark
+                      ? row.remark
+                      : row.status_preserved_from
+                        ? `keeps ${row.status_preserved_from}`
+                        : row.status || row.willing_to_join || ""}
                 </span>
               </div>
             ))}
-            {(preview.rows || []).length > 60 ? (
+            {(preview.rows || []).length > 70 ? (
               <p className="muted" style={{ padding: 10 }}>
-                …and {preview.rows.length - 60} more rows.
+                …and {preview.rows.length - 70} more rows.
               </p>
             ) : null}
           </div>
 
-          <div className="rsa-actions">
-            <button className="back-button" type="button" onClick={reset} disabled={busy}>
-              <ArrowLeft size={16} /> Back
-            </button>
-            <button className="primary-button" type="button" onClick={handleConfirm} disabled={busy}>
-              {busy ? <Loader2 className="spin" size={18} /> : <BadgeCheck size={18} />}
-              Confirm import
-            </button>
-          </div>
+          {inSync ? (
+            <div className="rsa-actions">
+              <button className="back-button" type="button" onClick={cancelSync} disabled={busy}>
+                <XCircle size={16} /> Cancel sync
+              </button>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button className="back-button" type="button" onClick={skipSyncStep} disabled={busy}>
+                  {syncStep === "responses" ? "Skip to shortlist" : "Finish"}
+                </button>
+                <button className="primary-button" type="button" onClick={syncConfirm} disabled={busy}>
+                  {busy ? <Loader2 className="spin" size={18} /> : <BadgeCheck size={18} />}
+                  {syncStep === "responses" ? "Confirm & continue" : "Confirm shortlist"}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="rsa-actions">
+              <button className="back-button" type="button" onClick={reset} disabled={busy}>
+                <ArrowLeft size={16} /> Back
+              </button>
+              <button className="primary-button" type="button" onClick={handleConfirm} disabled={busy}>
+                {busy ? <Loader2 className="spin" size={18} /> : <BadgeCheck size={18} />}
+                Confirm import
+              </button>
+            </div>
+          )}
         </>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -2606,6 +3597,7 @@ function OpportunityDetail({ detail, adminToken, opportunityId, onRefresh }) {
             <SheetImportPanel
               adminToken={adminToken}
               opportunityId={opportunityId}
+              opportunity={o}
               onImported={onRefresh}
             />
             <InterviewReportsPanel adminToken={adminToken} opportunityId={opportunityId} />
