@@ -508,8 +508,13 @@ function StatusMessage({ error, message }) {
 /* --- What a student sees of their own RSA report ------------------- */
 function StudentReportCard({ report, defaultOpen = false }) {
   const [open, setOpen] = useState(defaultOpen);
+  const [showMissed, setShowMissed] = useState(false);
   const overall = report.overall || {};
   const skills = Object.entries(report.skill_ratings || {});
+  // A student learns from what they missed — not from re-reading every answer.
+  const missed = (report.answers || []).filter((answer) =>
+    ["incorrect", "partial", "not_answered"].includes(answer.correctness),
+  );
 
   return (
     <div className="rsa-report" id={`report-${report.id}`}>
@@ -586,25 +591,28 @@ function StudentReportCard({ report, defaultOpen = false }) {
             </>
           ) : null}
 
-          <h4><CircleHelp size={15} /> Every question you were asked</h4>
-          <div className="rsa-answers">
-            {(report.answers || []).map((answer, index) => (
-              <div className="rsa-answer" key={index}>
-                <div className="rsa-answer-head">
-                  <strong>{answer.question_text}</strong>
-                  <span className={`status-pill ${correctnessClass(answer.correctness)}`}>
-                    {(answer.correctness || "").replaceAll("_", " ")}
-                  </span>
-                  <span className="rsa-acc">{answer.accuracy ?? 0}%</span>
+          {missed.length ? (
+            <div className="rsa-revisit">
+              <button type="button" className="rsa-revisit-toggle" onClick={() => setShowMissed((value) => !value)}>
+                {showMissed ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+                {showMissed ? "Hide" : "Review"} the {missed.length} question{missed.length > 1 ? "s" : ""} worth revisiting
+              </button>
+              {showMissed ? (
+                <div className="rsa-revisit-list">
+                  {missed.map((answer, index) => (
+                    <div className="rsa-revisit-item" key={index}>
+                      <strong>{answer.question_text}</strong>
+                      {answer.ideal_answer ? (
+                        <p><em>How to answer it:</em> {answer.ideal_answer}</p>
+                      ) : answer.feedback ? (
+                        <p>{answer.feedback}</p>
+                      ) : null}
+                    </div>
+                  ))}
                 </div>
-                {answer.student_answer ? <p><em>You said:</em> {answer.student_answer}</p> : null}
-                {answer.feedback ? <p><em>Feedback:</em> {answer.feedback}</p> : null}
-                {answer.ideal_answer ? (
-                  <p className="rsa-ideal"><em>A better answer:</em> {answer.ideal_answer}</p>
-                ) : null}
-              </div>
-            ))}
-          </div>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>
@@ -668,6 +676,68 @@ function PracticeQuestionCard({ question }) {
   );
 }
 
+function PracticeRow({ question }) {
+  const [open, setOpen] = useState(false);
+  const diff = (question.difficulty || "").toLowerCase();
+  const asked = (question.companies || []).filter(Boolean);
+  return (
+    <div className="pr">
+      <button type="button" className="pr-head" onClick={() => setOpen((v) => !v)}>
+        <span className="pr-caret">{open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</span>
+        <span className="pr-main">
+          <strong>{question.question_text}</strong>
+          <span className="pr-meta">
+            {question.difficulty ? <span className={`pr-diff ${diff}`}>{question.difficulty}</span> : null}
+            {question.question_type === "scenario" ? <span className="pr-diff scenario">scenario</span> : null}
+            {question.times_asked > 1 ? <span className="pr-asked">asked {question.times_asked}×</span> : null}
+            {asked.length ? <span className="pr-asked">Asked at {asked.slice(0, 2).join(", ")}</span> : null}
+          </span>
+        </span>
+      </button>
+      {open ? (
+        <div className="pr-body">
+          {question.model_answer ? (
+            <>
+              <p className="pr-how">How to answer it</p>
+              <p className="pr-ideal">{question.model_answer}</p>
+            </>
+          ) : null}
+          {question.prepare?.length ? (
+            <div className="pr-prep">{question.prepare.map((p) => <span key={p} className="pr-chip">{p}</span>)}</div>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function PracticeGroup({ group, defaultOpen }) {
+  const [open, setOpen] = useState(defaultOpen);
+  const companies = useMemo(() => {
+    const seen = [];
+    (group.questions || []).forEach((q) => (q.companies || []).forEach((c) => { if (c && !seen.includes(c)) seen.push(c); }));
+    return seen;
+  }, [group]);
+  const subtitle = companies.length
+    ? `Asked at ${companies.slice(0, 2).join(", ")}${companies.length > 2 ? ` +${companies.length - 2}` : ""}`
+    : `${group.questions.length} question${group.questions.length === 1 ? "" : "s"}`;
+  return (
+    <div className="pg">
+      <button type="button" className="pg-head" onClick={() => setOpen((v) => !v)}>
+        <span className="pg-cat">{group.category}</span>
+        <span className="pg-sub">{subtitle}</span>
+        <span className="pg-count">{group.questions.length}</span>
+        <span className="pg-caret">{open ? <ChevronDown size={18} /> : <ChevronRight size={18} />}</span>
+      </button>
+      {open ? (
+        <div className="pg-body">
+          {group.questions.map((q) => <PracticeRow key={q.question_key} question={q} />)}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function PracticeBank({ token }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -697,62 +767,44 @@ function PracticeBank({ token }) {
   }, [token, includeScenario, category, company, difficulty, search]);
 
   const questions = data?.questions || [];
-
-  // Company Focus: the topics these questions actually cover, so it can never
-  // disagree with the list shown underneath it.
-  const focus = useMemo(() => {
-    const seen = [];
-    questions.forEach((question) => {
-      [question.category, question.topic].forEach((value) => {
-        const label = (value || "").trim();
-        if (label && !seen.includes(label)) seen.push(label);
-      });
-    });
-    return seen.slice(0, 10);
-  }, [questions]);
+  const groups = (data?.groups || []).filter((group) => (group.questions || []).length);
 
   return (
     <>
-      <p className="rsa-hint">
-        Real questions asked in interviews across companies. Use them to prepare — the more often a
-        question shows up, the more likely you'll be asked it.
-      </p>
-
-      <div className="rsa-filters">
-        <input
-          className="search-input"
-          placeholder="Search questions…"
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-        />
-        <select className="sort-select" value={company} onChange={(event) => setCompany(event.target.value)}>
+      <div className="sd-prac-filter">
+        <span className="sd-search">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#98a2b3" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg>
+          <input
+            placeholder="Search questions…"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+        </span>
+        <select value={company} onChange={(event) => setCompany(event.target.value)}>
           <option value="">All companies</option>
           {(data?.companies || []).map((item) => (
             <option key={item} value={item}>{item}</option>
           ))}
         </select>
-        <select className="sort-select" value={category} onChange={(event) => setCategory(event.target.value)}>
+        <select value={category} onChange={(event) => setCategory(event.target.value)}>
           <option value="">All tech stacks</option>
           {(data?.categories || []).map((item) => (
             <option key={item} value={item}>{item}</option>
           ))}
         </select>
-        <select className="sort-select" value={difficulty} onChange={(event) => setDifficulty(event.target.value)}>
+        <select value={difficulty} onChange={(event) => setDifficulty(event.target.value)}>
           <option value="">Any difficulty</option>
           <option value="easy">Easy</option>
           <option value="medium">Medium</option>
           <option value="hard">Hard</option>
         </select>
-        <label className="rsa-toggle">
+        <label className="sd-scenario">
           <input
             type="checkbox"
             checked={includeScenario}
             onChange={(event) => setIncludeScenario(event.target.checked)}
           />
-          <span>
-            Include scenario-based
-            {data?.scenario_available ? ` (${data.scenario_available})` : ""}
-          </span>
+          <span>Include scenario-based{data?.scenario_available ? ` (${data.scenario_available})` : ""}</span>
         </label>
       </div>
 
@@ -770,89 +822,89 @@ function PracticeBank({ token }) {
       ) : null}
 
       {!loading && questions.length ? (
-        <>
-          {focus.length ? (
-            <div className="rsa-focus">
-              <strong>What these companies focus on</strong>
-              <div className="rsa-focus-list">
-                {focus.map((item) => (
-                  <span className="rsa-focus-chip" key={item}>{item}</span>
-                ))}
-              </div>
-            </div>
-          ) : null}
-
-          <p className="muted" style={{ marginBottom: 10 }}>
-            Showing {questions.length} question{questions.length === 1 ? "" : "s"}
-            {!includeScenario && data?.scenario_available
-              ? ` · ${data.scenario_available} scenario question${data.scenario_available === 1 ? "" : "s"} hidden`
-              : ""}
-          </p>
-
-          {/* Grouped by topic so a student revises one area at a time. */}
-          {(data?.groups || []).map((group) => (
-            <div className="rsa-group" key={group.category}>
-              <div className="rsa-group-head">
-                <span className="rsa-cat tech">{group.category}</span>
-                <span className="muted">{group.count} question{group.count === 1 ? "" : "s"}</span>
-              </div>
-              <div className="rsa-practices">
-                {group.questions.map((question) => (
-                  <PracticeQuestionCard key={question.question_key} question={question} />
-                ))}
-              </div>
-            </div>
+        <div className="sd-prac-groups">
+          {/* First topic opens expanded; the rest are collapsible drill-in cards. */}
+          {groups.map((group, i) => (
+            <PracticeGroup key={group.category} group={group} defaultOpen={i === 0} />
           ))}
-        </>
+        </div>
       ) : null}
     </>
   );
 }
 
-function StudentReportsView({ reports, loading, focusId }) {
+function StudentReportsView({ reports, loading, focusId, onPractice = () => {} }) {
   return (
-    <section className="panel wide">
-      <div className="panel-title">
-        <FileText size={20} />
-        <h2>Interview Feedback</h2>
+    <div className="sd-feedback">
+      <div className="sd-view-head">
+        <h2>Interview feedback</h2>
+        <p>Coaching notes from your real interviews — what went well, and what to fix before the next one.</p>
       </div>
 
       {loading ? (
         <PanelLoader />
       ) : reports.length ? (
-        <>
-          <p className="rsa-hint">
-            Detailed feedback from your interviews, including what to improve before the next one.
-          </p>
-          <div className="rsa-reports">
-            {reports.map((report) => (
-              <StudentReportCard key={report.id} report={report} defaultOpen={report.id === focusId} />
-            ))}
-          </div>
-        </>
+        <div className="rsa-reports">
+          {reports.map((report) => (
+            <StudentReportCard
+              key={report.id}
+              report={report}
+              defaultOpen={report.id === focusId || reports.length === 1}
+            />
+          ))}
+        </div>
       ) : (
-        <div className="empty-state">
+        <div className="sd-fb-empty">
+          <span className="sd-fb-empty-icon"><FileText size={24} /></span>
+          <h3>No feedback yet — and that's normal</h3>
           <p>
-            No feedback published yet. After an interview, your feedback appears here once the
-            placement team has reviewed it.
+            After an interview, your coaching notes appear here once the placement team has reviewed
+            them. Until then, the best preparation is practising what these companies actually ask.
           </p>
+          <button type="button" className="sd-btn-primary" onClick={onPractice}>
+            Practice questions from your companies
+          </button>
         </div>
       )}
-    </section>
+    </div>
   );
 }
 
 function StudentPracticeView({ token }) {
   return (
-    <section className="panel wide">
-      <div className="panel-title">
-        <BookOpenCheck size={20} />
-        <h2>Practice Questions</h2>
+    <div className="sd-practice">
+      <div className="sd-view-head">
+        <h2>Practice questions</h2>
+        <p>Real questions asked in real interviews across every company on RSA. The more often one shows up, the more likely you'll be asked it.</p>
       </div>
       <PracticeBank token={token} />
-    </section>
+    </div>
   );
 }
+
+function greeting() {
+  const h = new Date().getHours();
+  return h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
+}
+
+// Map an application to the student-facing stage bucket + pill.
+function studentStatusInfo(app) {
+  const raw = String(app.status || app.current_status || "").toUpperCase();
+  if (app.is_interested === false || raw === "DROPPED" || raw === "NOT_INTERESTED")
+    return { key: "declined", label: "Not interested", cls: "muted" };
+  if (raw.includes("INTERVIEW")) return { key: "interviewing", label: "Interview in progress", cls: "warn" };
+  if (raw === "SHORTLISTED") return { key: "shortlisted", label: "Shortlisted", cls: "good" };
+  if (["SELECTED", "JOINED", "OFFER_ACCEPTED", "OFFER_RELEASED", "OFFER_PENDING"].includes(raw))
+    return { key: "shortlisted", label: raw === "JOINED" ? "Joined" : "Selected", cls: "good" };
+  return { key: "applied", label: "Applied", cls: "neutral" };
+}
+
+const SD_GROUPS = [
+  { key: "interviewing", title: "Interviewing", chipLabel: "Now", chipCls: "warn", sub: "feedback may be ready" },
+  { key: "shortlisted", title: "Shortlisted", chipLabel: "Good news", chipCls: "good", sub: "companies want to talk to you" },
+  { key: "applied", title: "Applied · waiting to hear back", chipLabel: "Waiting", chipCls: "neutral", sub: "companies" },
+  { key: "declined", title: "Not interested", chipLabel: "Closed", chipCls: "muted", sub: "you declined" },
+];
 
 function StudentDashboard({ student, token, onLogout, route = [], navigate = () => {} }) {
   const [dashboard, setDashboard] = useState(null);
@@ -871,6 +923,8 @@ function StudentDashboard({ student, token, onLogout, route = [], navigate = () 
   const [reports, setReports] = useState([]);
   const [loadingReports, setLoadingReports] = useState(true);
   const [focusReportId, setFocusReportId] = useState(null);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [openGroups, setOpenGroups] = useState({ interviewing: true, shortlisted: true, applied: false, declined: false });
 
   useEffect(() => {
     let isCurrent = true;
@@ -925,7 +979,7 @@ function StudentDashboard({ student, token, onLogout, route = [], navigate = () 
   }
 
   const initials = useMemo(() => {
-    return student.name
+    return (student.name || "")
       .split(" ")
       .filter(Boolean)
       .slice(0, 2)
@@ -933,30 +987,104 @@ function StudentDashboard({ student, token, onLogout, route = [], navigate = () 
       .join("")
       .toUpperCase();
   }, [student.name]);
+  const firstName = (student.name || "there").split(" ")[0];
 
-  const profileItems = [
-    ["Phone", student.phone],
-    ["Email", student.email || "Not added"],
-    ["Stack", student.stack || "To be mapped"],
-    ["Resume", student.resume_link ? "Available" : "Not added"],
-  ];
   const summary = dashboard?.summary || {};
   const applications = dashboard?.applications || [];
   const shortlisted = dashboard?.shortlisted_applications || [];
+  const newestReport = reports[0];
+
+  const groups = useMemo(() => {
+    const buckets = { interviewing: [], shortlisted: [], applied: [], declined: [] };
+    applications.forEach((app) => {
+      const info = studentStatusInfo(app);
+      (buckets[info.key] || buckets.applied).push(app);
+    });
+    return buckets;
+  }, [applications]);
+
+  const stages = [
+    { key: "applied", label: "Applied", count: groups.applied.length, note: "waiting", color: "#98a2b3" },
+    { key: "shortlisted", label: "Shortlisted", count: groups.shortlisted.length, note: "want to talk", color: "#0f766e" },
+    { key: "interviewing", label: "Interviewing", count: groups.interviewing.length, note: "in progress", color: "#f79009" },
+    { key: "feedback", label: "Feedback ready", count: reports.length, note: "to read", color: "#12b76a" },
+  ];
+
+  const headerSub = shortlisted.length
+    ? `${shortlisted.length} ${shortlisted.length === 1 ? "company has" : "companies have"} shortlisted you${reports.length ? ", and you have new coaching feedback." : "."}`
+    : "Here's where your applications stand.";
+
+  function toggleGroup(key) {
+    setOpenGroups((prev) => ({ ...prev, [key]: !prev[key] }));
+  }
+
+  function AppCard({ app }) {
+    const info = studentStatusInfo(app);
+    const opp = app.opportunity || {};
+    const report = reportByApplication[app.id];
+    const links = [
+      ["Resume", app.resume_link, FileText],
+      ["Project", app.project_link, Code],
+      ["GitHub", app.github_link, Github],
+    ].filter(([, href]) => Boolean(href));
+    const meta = [
+      opp.location,
+      opp.stipend ? `Stipend ${opp.stipend}` : null,
+      opp.duration,
+      app.applied_at ? `Applied ${formatDate(app.applied_at)}` : null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    return (
+      <div className="sd-app">
+        <div className="sd-app-top">
+          <div className="sd-app-info">
+            <div className="sd-app-title">
+              <strong>{app.company?.name || "Company"}</strong>
+              <span className={`sd-pill ${info.cls}`}>{info.label}</span>
+            </div>
+            <p className="sd-app-role">
+              {opp.role || "Role not mapped"}
+              {opp.tech_stack || opp.must_have_skills ? ` · ${opp.tech_stack || opp.must_have_skills}` : ""}
+            </p>
+            {meta ? <p className="sd-app-meta">{meta}</p> : null}
+          </div>
+          <div className="sd-app-actions">
+            {links.length ? (
+              <div className="sd-links">
+                {links.map(([label, href, Icon]) => (
+                  <a key={label} href={href} target="_blank" rel="noreferrer" title={label}>
+                    <Icon size={17} />
+                  </a>
+                ))}
+              </div>
+            ) : null}
+            {report ? (
+              <button type="button" className="sd-read-fb" onClick={() => openReport(report.id)}>
+                <FileText size={14} /> Read feedback
+              </button>
+            ) : null}
+          </div>
+        </div>
+        {app.screening_remark ? (
+          <div className="sd-remark">
+            <AlertCircle size={15} />
+            <p><strong>Note from the company</strong> — {app.screening_remark}</p>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
 
   return (
-    <main className="dashboard-shell">
+    <main className="dashboard-shell sd-shell">
       <aside className="sidebar">
         <div className="side-brand">
           <ShieldCheck size={22} />
           <span>RSA</span>
         </div>
         <nav>
-          <button
-            type="button"
-            className={view === "dashboard" ? "active" : ""}
-            onClick={() => setView("dashboard")}
-          >
+          <button type="button" className={view === "dashboard" ? "active" : ""} onClick={() => setView("dashboard")}>
             <BarChart3 size={18} /> Dashboard
           </button>
           <button
@@ -967,121 +1095,190 @@ function StudentDashboard({ student, token, onLogout, route = [], navigate = () 
               setView("reports");
             }}
           >
-            <FileText size={18} /> Interview Feedback
+            <FileText size={18} /> Interview feedback
             {reports.length ? <span className="nav-count">{reports.length}</span> : null}
           </button>
-          <button
-            type="button"
-            className={view === "practice" ? "active" : ""}
-            onClick={() => setView("practice")}
-          >
-            <BookOpenCheck size={18} /> Practice Questions
+          <button type="button" className={view === "practice" ? "active" : ""} onClick={() => setView("practice")}>
+            <BookOpenCheck size={18} /> Practice questions
           </button>
         </nav>
-        <button className="ghost-button" onClick={onLogout}>
-          <LogOut size={18} />
-          Logout
-        </button>
+        <div className="sd-side-foot">
+          {shortlisted.length ? (
+            <p className="sd-nudge">You're on {shortlisted.length} shortlist{shortlisted.length === 1 ? "" : "s"}. Keep the momentum going.</p>
+          ) : null}
+          <button className="ghost-button" onClick={onLogout}>
+            <LogOut size={18} /> Log out
+          </button>
+        </div>
       </aside>
 
       <section className="dashboard-main">
-        <header className="topbar">
+        <header className="topbar sd-topbar">
           <div>
-            <p className="eyebrow">Student Dashboard</p>
-            <h1>Welcome, {student.name}</h1>
+            <p className="eyebrow">Student dashboard</p>
+            <h1>{greeting()}, {firstName} 👋</h1>
+            <p className="sd-header-sub">{headerSub}</p>
           </div>
-          <div className="avatar" aria-label={student.name}>{initials}</div>
+          <div className="sd-profile-wrap">
+            <button type="button" className="sd-profile-btn" onClick={() => setProfileOpen((v) => !v)}>
+              <span className="avatar">{initials}</span>
+              <span className="sd-profile-name">{firstName}</span>
+              <ChevronDown size={16} />
+            </button>
+            {profileOpen ? (
+              <div className="sd-profile-menu">
+                <p className="sd-profile-eyebrow">Your profile</p>
+                <div className="sd-profile-list">
+                  <div><span>Phone</span><strong>{student.phone || "—"}</strong></div>
+                  <div><span>Email</span><strong>{student.email || "—"}</strong></div>
+                  <div><span>Stack</span><strong>{student.stack || "To be mapped"}</strong></div>
+                  <div>
+                    <span>Resume</span>
+                    {student.resume_link ? (
+                      <a href={student.resume_link} target="_blank" rel="noreferrer">View resume</a>
+                    ) : (
+                      <strong>Not added</strong>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : null}
+          </div>
         </header>
 
         {view === "reports" ? (
-          <StudentReportsView reports={reports} loading={loadingReports} focusId={focusReportId} />
+          <StudentReportsView reports={reports} loading={loadingReports} focusId={focusReportId} onPractice={() => setView("practice")} />
         ) : view === "practice" ? (
           <StudentPracticeView token={token} />
+        ) : dashboardError ? (
+          <StatusMessage error={dashboardError} />
+        ) : loadingDashboard ? (
+          <PanelLoader />
         ) : (
-        <>
-        <section className="stats-grid">
-          <Metric icon={<BriefcaseBusiness size={20} />} label="Applications" value={summary.total_applications ?? 0} />
-          <Metric icon={<BadgeCheck size={20} />} label="Shortlisted" value={summary.shortlisted_count ?? 0} />
-          <Metric icon={<XCircle size={20} />} label="Rejected" value={summary.rejected_count ?? 0} />
-          <Metric
-            icon={<FileText size={20} />}
-            label="Feedback"
-            value={reports.length}
-            onClick={reports.length ? () => setView("reports") : undefined}
-          />
-        </section>
-
-        {dashboardError ? <StatusMessage error={dashboardError} /> : null}
-
-        <section className="content-grid">
-          <div className="panel profile-panel">
-            <div className="panel-title">
-              <UserRound size={20} />
-              <h2>Profile</h2>
-            </div>
-            <div className="profile-list">
-              {profileItems.map(([label, value]) => (
-                <div key={label}>
-                  <span>{label}</span>
-                  <strong>{value}</strong>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="panel">
-            <div className="panel-title">
-              <CheckCircle2 size={20} />
-              <h2>Interview Ready</h2>
-            </div>
-            {loadingDashboard ? (
-              <PanelLoader />
-            ) : shortlisted.length ? (
-              <div className="shortlist-list">
-                {shortlisted.slice(0, 4).map((application) => (
-                  <ApplicationMini key={application.id} application={application} />
+          <>
+            <section className="sd-stage-bar">
+              <div className="sd-stage-head">
+                <h2>Where your {applications.length} application{applications.length === 1 ? "" : "s"} stand</h2>
+                <span>Tap a stage to jump to it</span>
+              </div>
+              <div className="sd-stages">
+                {stages.map((stage) => (
+                  <button
+                    type="button"
+                    key={stage.key}
+                    className={`sd-stage ${stage.key !== "feedback" && openGroups[stage.key] ? "on" : ""}`}
+                    onClick={() => (stage.key === "feedback" ? setView("reports") : toggleGroup(stage.key))}
+                  >
+                    <span className="sd-stage-label">
+                      <i style={{ background: stage.color }} /> {stage.label}
+                    </span>
+                    <span className="sd-stage-count">
+                      <strong>{stage.count}</strong> {stage.note}
+                    </span>
+                  </button>
                 ))}
               </div>
-            ) : (
-              <div className="empty-state">
-                <p>Shortlisted opportunities will appear here.</p>
-              </div>
-            )}
-          </div>
+            </section>
 
-          <div className="panel wide">
-            <div className="panel-title">
-              <BriefcaseBusiness size={20} />
-              <h2>My Applications</h2>
-            </div>
-            {loadingDashboard ? (
-              <PanelLoader />
-            ) : applications.length ? (
-              <div className="applications-table with-feedback">
-                <div className="applications-head">
-                  <span>Company</span>
-                  <span>Role</span>
-                  <span>Status</span>
-                  <span>Links</span>
-                  <span>Feedback</span>
+            <div className="sd-grid">
+              <section className="sd-groups">
+                {applications.length ? (
+                  SD_GROUPS.map((g) => {
+                    const items = groups[g.key];
+                    if (!items.length) return null;
+                    const open = openGroups[g.key];
+                    return (
+                      <div className="sd-group" key={g.key}>
+                        <button type="button" className="sd-group-head" onClick={() => toggleGroup(g.key)}>
+                          <span className={`sd-chip ${g.chipCls}`}>{g.chipLabel}</span>
+                          <span className="sd-group-title">{g.title}</span>
+                          <span className="sd-group-sub">{items.length} {g.sub}</span>
+                          <span className="sd-caret">{open ? <ChevronDown size={18} /> : <ChevronRight size={18} />}</span>
+                        </button>
+                        {open ? (
+                          <div className="sd-group-body">
+                            {items.map((app) => <AppCard key={app.id} app={app} />)}
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className="empty-state"><p>No applications yet.</p></div>
+                )}
+              </section>
+
+              <aside className="sd-side">
+                {newestReport ? (
+                  <>
+                    <div className="sd-coach">
+                      <div className="sd-coach-head">
+                        <div className="sd-coach-eyebrow"><Sparkles size={14} /> New coaching feedback</div>
+                        <h3>{newestReport.company?.name || "Company"}</h3>
+                        <p>{newestReport.opportunity?.role || "Role"}{newestReport.generated_at ? ` · ${formatDate(newestReport.generated_at)}` : ""}</p>
+                      </div>
+                      <div className="sd-coach-body">
+                        {newestReport.overall?.summary ? <p className="sd-coach-summary">{newestReport.overall.summary}</p> : null}
+                        <div className="sd-mini-skills">
+                          {Object.entries(newestReport.skill_ratings || {}).slice(0, 3).map(([name, rating]) => (
+                            <div className="sd-mini-skill" key={name}>
+                              <span>{name}</span>
+                              <span className="sd-mini-bar"><i style={{ width: `${((rating || 0) / 5) * 100}%` }} /></span>
+                              <b>{rating ?? "–"}/5</b>
+                            </div>
+                          ))}
+                        </div>
+                        <button type="button" className="sd-btn-primary" onClick={() => openReport(newestReport.id)}>Read the full feedback</button>
+                      </div>
+                    </div>
+
+                    {newestReport.improvements?.length ? (
+                      <div className="sd-card">
+                        <p className="sd-card-eyebrow">Fix these first</p>
+                        <div className="sd-fix-list">
+                          {newestReport.improvements.slice(0, 3).map((imp, i) => (
+                            <div className="sd-fix" key={i}>
+                              <span className={`sd-prio ${imp.priority}`}>{imp.priority === "high" ? "High" : imp.priority === "medium" ? "Med" : imp.priority}</span>
+                              <span>{imp.area}</span>
+                            </div>
+                          ))}
+                        </div>
+                        <button type="button" className="sd-btn-soft" onClick={() => setView("practice")}>Practice what you missed</button>
+                      </div>
+                    ) : null}
+                  </>
+                ) : (
+                  <div className="sd-card">
+                    <p className="sd-card-eyebrow">Interview coaching</p>
+                    <p className="sd-empty-note">No feedback yet — once you interview, your coaching appears here. Until then, practice what your companies ask.</p>
+                    <button type="button" className="sd-btn-soft" onClick={() => setView("practice")}>Practice questions</button>
+                  </div>
+                )}
+
+                <div className="sd-card">
+                  <div className="sd-card-head">
+                    <p className="sd-card-eyebrow">Interview ready</p>
+                    <span className="sd-card-count">{shortlisted.length}</span>
+                  </div>
+                  {shortlisted.length ? (
+                    <div className="sd-ready-list">
+                      {shortlisted.slice(0, 5).map((app) => (
+                        <div className="sd-ready" key={app.id}>
+                          <span className="sd-ready-info">
+                            <strong>{app.company?.name || "Company"}</strong>
+                            <span>{app.opportunity?.role || "Role"}</span>
+                          </span>
+                          <span className="sd-ready-date">{app.applied_at ? formatDate(app.applied_at) : ""}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="sd-empty-note">Shortlists will appear here.</p>
+                  )}
                 </div>
-                {applications.map((application) => (
-                  <ApplicationRow
-                    key={application.id}
-                    application={application}
-                    report={reportByApplication[application.id]}
-                    onOpenReport={openReport}
-                  />
-                ))}
-              </div>
-            ) : (
-              <div className="empty-state compact">
-                <p>No applications found for this student yet.</p>
-              </div>
-            )}
-          </div>
-        </section>
-        </>
+              </aside>
+            </div>
+          </>
         )}
       </section>
     </main>
@@ -1206,10 +1403,13 @@ function AdminDashboard({ adminToken, onLogout, route = [], navigate = () => {} 
       ? "students"
       : route[1] === "analytics"
         ? "analytics"
-        : route[1] === "company"
-          ? "company"
-          : "overview";
+        : route[1] === "student"
+          ? "student"
+          : route[1] === "company"
+            ? "company"
+            : "overview";
   const companyId = route[1] === "company" ? route[2] || null : null;
+  const studentId = route[1] === "student" ? route[2] || null : null;
   const routeOppId = route[3] === "opp" ? route[4] || null : null;
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -1319,7 +1519,14 @@ function AdminDashboard({ adminToken, onLogout, route = [], navigate = () => {} 
       </aside>
 
       <section className="dashboard-main">
-        {activeView === "company" ? (
+        {activeView === "student" ? (
+          <StudentProfileView
+            adminToken={adminToken}
+            studentId={studentId}
+            navigate={navigate}
+            onBack={() => window.history.back()}
+          />
+        ) : activeView === "company" ? (
           <CompanyDetailView
             adminToken={adminToken}
             companyId={companyId}
@@ -1359,9 +1566,9 @@ function AdminDashboard({ adminToken, onLogout, route = [], navigate = () => {} 
         {error ? <StatusMessage error={error} /> : null}
 
         {activeView === "analytics" ? (
-          <AdminAnalyticsView adminToken={adminToken} />
+          <AdminAnalyticsView adminToken={adminToken} navigate={navigate} />
         ) : activeView === "students" ? (
-          <AdminStudentsView students={students} loading={loadingStudents} />
+          <AdminStudentsView students={students} loading={loadingStudents} navigate={navigate} />
         ) : (
           <>
             <section className="stats-grid admin-stats compact-stats">
@@ -1656,7 +1863,7 @@ function TrendChart({ points }) {
   );
 }
 
-function AdminAnalyticsView({ adminToken }) {
+function AdminAnalyticsView({ adminToken, navigate = () => {} }) {
   const [preset, setPreset] = useState("this_month");
   const [range, setRange] = useState(() => presetRange("this_month"));
   const [data, setData] = useState(null);
@@ -1830,7 +2037,20 @@ function AdminAnalyticsView({ adminToken }) {
                     >
                       <div className="student-name-cell">
                         <ChevronRight size={15} className="row-caret" />
-                        <strong>{s.name}</strong>
+                        {s.id ? (
+                          <button
+                            type="button"
+                            className="link-button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigate(["admin", "student", s.id]);
+                            }}
+                          >
+                            {s.name}
+                          </button>
+                        ) : (
+                          <strong>{s.name}</strong>
+                        )}
                       </div>
                       <div><span className="mini-count">{s.apps}</span></div>
                       <div><span className="mini-count good">{s.shortlisted}</span></div>
@@ -1871,6 +2091,229 @@ function AdminAnalyticsView({ adminToken }) {
         </>
       )}
     </div>
+  );
+}
+
+/* --------------------------- Student profile --------------------------- */
+
+function ProfileField({ label, value }) {
+  return (
+    <div className="profile-field">
+      <span>{label}</span>
+      <strong>{value || "—"}</strong>
+    </div>
+  );
+}
+
+function AdminInterviewReportCard({ report }) {
+  const overall = report.overall || {};
+  const comm = report.communication || {};
+  const asList = (v) => (Array.isArray(v) ? v : v ? [v] : []);
+  const text = (x) => (typeof x === "string" ? x : x?.point || x?.note || x?.text || JSON.stringify(x));
+  return (
+    <div className="report-card">
+      <div className="report-head">
+        <div className="report-title">
+          <strong>{report.company || "Company"}</strong>
+          <span>{report.role || ""}</span>
+        </div>
+        <div className="report-scores">
+          {overall.score != null ? <span className="score-pill">{overall.score}/10</span> : null}
+          {overall.verdict ? <span className="verdict">{overall.verdict}</span> : null}
+          <span className={`vis-badge ${report.visible_to_student ? "on" : ""}`}>
+            {report.visible_to_student ? "Shared with student" : "Not shared"}
+          </span>
+        </div>
+      </div>
+      {overall.summary ? <p className="report-summary">{overall.summary}</p> : null}
+      {asList(report.strengths).length ? (
+        <div className="report-sec">
+          <strong>Strengths</strong>
+          <ul>{asList(report.strengths).map((x, i) => <li key={i}>{text(x)}</li>)}</ul>
+        </div>
+      ) : null}
+      {asList(report.improvements).length ? (
+        <div className="report-sec">
+          <strong>Areas to improve</strong>
+          <ul>{asList(report.improvements).map((x, i) => <li key={i}>{text(x)}</li>)}</ul>
+        </div>
+      ) : null}
+      {comm.notes ? (
+        <div className="report-sec">
+          <strong>Communication</strong>
+          <p>{comm.notes}</p>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function StudentProfileView({ adminToken, studentId, navigate, onBack }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [filter, setFilter] = useState("all");
+
+  useEffect(() => {
+    let live = true;
+    setLoading(true);
+    setError("");
+    setFilter("all");
+    apiRequest(`/admin/students/${studentId}`, { adminToken })
+      .then((d) => live && setData(d))
+      .catch((e) => live && setError(e.message))
+      .finally(() => live && setLoading(false));
+    return () => {
+      live = false;
+    };
+  }, [studentId, adminToken]);
+
+  const s = data?.student;
+  const stats = data?.stats || {};
+  const apps = data?.applications || [];
+  const filtered = apps.filter((a) =>
+    filter === "shortlisted"
+      ? a.status === "SHORTLISTED"
+      : filter === "declined"
+        ? !a.interested
+        : filter === "interested"
+          ? a.interested
+          : true,
+  );
+
+  return (
+    <>
+      <header className="topbar">
+        <div className="topbar-lead">
+          <button type="button" className="back-button" onClick={onBack}>
+            <ArrowLeft size={17} /> Back
+          </button>
+          <div>
+            <p className="eyebrow">Student</p>
+            <h1>{s?.name || "Student"}</h1>
+          </div>
+        </div>
+      </header>
+
+      {error ? <StatusMessage error={error} /> : null}
+
+      {loading || !data ? (
+        <PanelLoader />
+      ) : (
+        <>
+          <section className="panel wide profile-card">
+            <div className="profile-fields">
+              <ProfileField label="Email" value={s.email} />
+              <ProfileField label="Phone" value={s.phone} />
+              <ProfileField label="College" value={s.college_name} />
+              <ProfileField label="Degree" value={[s.degree, s.department].filter(Boolean).join(" · ")} />
+              <ProfileField label="Year of passing" value={s.year_of_passing} />
+              <ProfileField label="City" value={s.current_city} />
+              <ProfileField label="Mentor" value={s.technical_developer_name} />
+            </div>
+            <div className="profile-actions">
+              {s.resume_link ? (
+                <a className="back-button" href={s.resume_link} target="_blank" rel="noreferrer">
+                  <FileText size={15} /> Resume
+                </a>
+              ) : null}
+              {s.placed_status ? (
+                <span className="status-chip" style={{ color: "#15803d", borderColor: "#15803d" }}>Placed</span>
+              ) : null}
+            </div>
+          </section>
+
+          <section className="kpi-grid">
+            <KpiTile label="Applied" value={fmt(stats.interested)} sub={`${fmt(stats.responses)} responses`} />
+            <KpiTile label="Shortlisted" value={fmt(stats.shortlisted)} />
+            <KpiTile label="Selected" value={fmt(stats.selected)} />
+            <KpiTile label="Declined" value={fmt(stats.declined)} sub="not interested" />
+          </section>
+
+          {data.role_breakdown?.length ? (
+            <section className="panel wide">
+              <div className="panel-title">
+                <Sparkles size={18} />
+                <h2>Role interest mix</h2>
+              </div>
+              <BarList items={data.role_breakdown.map((r) => ({ key: r.category, label: r.category, n: r.n }))} />
+            </section>
+          ) : null}
+
+          <section className="panel wide">
+            <div className="panel-title">
+              <BriefcaseBusiness size={18} />
+              <h2>Applications</h2>
+              <div className="filter-chips">
+                {[["all", "All"], ["interested", "Applied"], ["shortlisted", "Shortlisted"], ["declined", "Declined"]].map(([k, l]) => (
+                  <button key={k} type="button" className={filter === k ? "chip active" : "chip"} onClick={() => setFilter(k)}>
+                    {l}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {filtered.length ? (
+              <div className="admin-table applicants-table">
+                <div className="admin-head">
+                  <span>Company</span>
+                  <span>Status</span>
+                  <span>Applied</span>
+                  <span>Links</span>
+                </div>
+                {filtered.map((a, i) => {
+                  const links = [["Resume", a.resume_link], ["GitHub", a.github_link], ["Project", a.project_link]].filter(([, h]) => Boolean(h));
+                  return (
+                    <div className="admin-row" key={i}>
+                      <div>
+                        <button
+                          type="button"
+                          className="link-button"
+                          onClick={() => a.company_id && navigate(["admin", "company", a.company_id])}
+                        >
+                          {a.company}
+                        </button>
+                        <span>{a.role} · {a.category}</span>
+                      </div>
+                      <div><StatusChip status={a.status} /></div>
+                      <div><span>{formatDate(a.applied_at)}</span></div>
+                      <div className="link-group">
+                        {links.length ? (
+                          links.map(([l, h]) => (
+                            <a key={l} href={h} target="_blank" rel="noreferrer" title={l}>
+                              <ExternalLink size={14} />
+                              {l}
+                            </a>
+                          ))
+                        ) : (
+                          <span className="muted">—</span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="chart-empty">No applications in this filter.</p>
+            )}
+          </section>
+
+          <section className="panel wide">
+            <div className="panel-title">
+              <MessageSquareQuote size={18} />
+              <h2>Interview feedback</h2>
+              {data.reports.length ? <span className="title-count">{data.reports.length}</span> : null}
+            </div>
+            {data.reports.length ? (
+              <div className="report-cards">
+                {data.reports.map((r, i) => <AdminInterviewReportCard key={i} report={r} />)}
+              </div>
+            ) : (
+              <p className="chart-empty">No interview reports yet.</p>
+            )}
+          </section>
+        </>
+      )}
+    </>
   );
 }
 
@@ -3656,7 +4099,7 @@ function listForMode(student, mode) {
   return student.applications || [];
 }
 
-function AdminStudentsView({ students, loading }) {
+function AdminStudentsView({ students, loading, navigate = () => {} }) {
   const [expanded, setExpanded] = useState(null);
   const [showAll, setShowAll] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
@@ -3769,7 +4212,14 @@ function AdminStudentsView({ students, loading }) {
               <React.Fragment key={student.id}>
                 <div className="admin-row student-row">
                   <div>
-                    <strong>{student.name || "Student"}</strong>
+                    <button
+                      type="button"
+                      className="link-button"
+                      onClick={() => student.id && navigate(["admin", "student", student.id])}
+                      title="View full profile"
+                    >
+                      {student.name || "Student"}
+                    </button>
                     <span>{student.phone || student.email || "Contact not added"}</span>
                   </div>
                   {countButton(student, "all", student.application_count, "")}
