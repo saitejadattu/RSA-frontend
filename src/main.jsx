@@ -32,6 +32,7 @@ import {
   ChevronUp,
   CircleHelp,
   Lightbulb,
+  ListChecks,
   MessageSquareQuote,
   Mic,
   Send,
@@ -889,7 +890,29 @@ function greeting() {
 
 // Map an application to the student-facing stage bucket + pill.
 function studentStatusInfo(app) {
+  // The backend derives the single student-facing outcome (and hides sensitive
+  // states like waitlist). Prefer it; fall back to raw status for old payloads.
   const raw = String(app.status || app.current_status || "").toUpperCase();
+  switch (app.student_outcome) {
+    case "declined":
+      return { key: "declined", label: "Not interested", cls: "muted" };
+    case "interviewing":
+      return { key: "interviewing", label: "Interview in progress", cls: "warn" };
+    case "interview_done":
+      return { key: "interviewing", label: "Interview done · awaiting result", cls: "warn" };
+    case "not_attended":
+      return { key: "not_shortlisted", label: "Interview not attended", cls: "bad" };
+    case "shortlisted":
+      return { key: "shortlisted", label: "Shortlisted", cls: "good" };
+    case "selected":
+      return { key: "shortlisted", label: raw === "JOINED" ? "Joined" : "Selected", cls: "good" };
+    case "not_shortlisted":
+      return { key: "not_shortlisted", label: "Not shortlisted", cls: "bad" };
+    case "pending":
+      return { key: "applied", label: "Applied", cls: "neutral" };
+    default:
+      break;
+  }
   if (app.is_interested === false || raw === "DROPPED" || raw === "NOT_INTERESTED")
     return { key: "declined", label: "Not interested", cls: "muted" };
   if (raw.includes("INTERVIEW")) return { key: "interviewing", label: "Interview in progress", cls: "warn" };
@@ -903,6 +926,7 @@ const SD_GROUPS = [
   { key: "interviewing", title: "Interviewing", chipLabel: "Now", chipCls: "warn", sub: "feedback may be ready" },
   { key: "shortlisted", title: "Shortlisted", chipLabel: "Good news", chipCls: "good", sub: "companies want to talk to you" },
   { key: "applied", title: "Applied · waiting to hear back", chipLabel: "Waiting", chipCls: "neutral", sub: "companies" },
+  { key: "not_shortlisted", title: "Not shortlisted", chipLabel: "Closed", chipCls: "bad", sub: "profile wasn't taken forward — read the note and update" },
   { key: "declined", title: "Not interested", chipLabel: "Closed", chipCls: "muted", sub: "you declined" },
 ];
 
@@ -995,7 +1019,7 @@ function StudentDashboard({ student, token, onLogout, route = [], navigate = () 
   const newestReport = reports[0];
 
   const groups = useMemo(() => {
-    const buckets = { interviewing: [], shortlisted: [], applied: [], declined: [] };
+    const buckets = { interviewing: [], shortlisted: [], applied: [], not_shortlisted: [], declined: [] };
     applications.forEach((app) => {
       const info = studentStatusInfo(app);
       (buckets[info.key] || buckets.applied).push(app);
@@ -1398,16 +1422,8 @@ function AdminDashboard({ adminToken, onLogout, route = [], navigate = () => {} 
   const [students, setStudents] = useState([]);
   // Navigation lives in the URL: #/admin, #/admin/students,
   // #/admin/company/<id>[/opp/<id>]. A refresh therefore lands where you were.
-  const activeView =
-    route[1] === "students"
-      ? "students"
-      : route[1] === "analytics"
-        ? "analytics"
-        : route[1] === "student"
-          ? "student"
-          : route[1] === "company"
-            ? "company"
-            : "overview";
+  const KNOWN_VIEWS = ["students", "analytics", "student", "company", "queue", "companies", "reports"];
+  const activeView = KNOWN_VIEWS.includes(route[1]) ? route[1] : "overview";
   const companyId = route[1] === "company" ? route[2] || null : null;
   const studentId = route[1] === "student" ? route[2] || null : null;
   const routeOppId = route[3] === "opp" ? route[4] || null : null;
@@ -1460,6 +1476,12 @@ function AdminDashboard({ adminToken, onLogout, route = [], navigate = () => {} 
 
   const summary = dashboard?.summary || {};
   const recentOpportunities = dashboard?.recent_opportunities || [];
+  const funnel = dashboard?.funnel || [];
+  const loss = dashboard?.loss || {};
+  const actionCenter = dashboard?.action_center || {};
+  const actionTotal = dashboard?.action_total ?? 0;
+  const placement = dashboard?.placement || {};
+  const reportsSummary = dashboard?.reports_summary || {};
 
   // Filter opportunities based on search term and role filter
   const filteredOpportunities = recentOpportunities.filter((opp) => {
@@ -1494,8 +1516,9 @@ function AdminDashboard({ adminToken, onLogout, route = [], navigate = () => {} 
     return 0;
   });
 
+  const overviewViews = ["overview", "queue", "companies", "reports"];
   return (
-    <main className="dashboard-shell">
+    <main className="dashboard-shell sd-shell">
       <aside className="sidebar">
         <div className="side-brand">
           <ShieldCheck size={22} />
@@ -1505,17 +1528,33 @@ function AdminDashboard({ adminToken, onLogout, route = [], navigate = () => {} 
           <button className={activeView === "overview" ? "active" : ""} type="button" onClick={backToOverview}>
             <BarChart3 size={18} /> Overview
           </button>
+          <button className={activeView === "queue" ? "active" : ""} type="button" onClick={() => navigate(["admin", "queue"])}>
+            <ListChecks size={18} /> Action queue
+            {actionTotal ? <span className="side-badge">{actionTotal}</span> : null}
+          </button>
           <button className={activeView === "students" ? "active" : ""} type="button" onClick={openStudentsView}>
             <UsersRound size={18} /> Students
+          </button>
+          <button className={activeView === "companies" ? "active" : ""} type="button" onClick={() => navigate(["admin", "companies"])}>
+            <Building2 size={18} /> Companies
+          </button>
+          <button className={activeView === "reports" ? "active" : ""} type="button" onClick={() => navigate(["admin", "reports"])}>
+            <FileText size={18} /> Interview reports
+            {reportsSummary.pending ? <span className="side-badge warn">{reportsSummary.pending}</span> : null}
           </button>
           <button className={activeView === "analytics" ? "active" : ""} type="button" onClick={() => navigate(["admin", "analytics"])}>
             <TrendingUp size={18} /> Analytics
           </button>
         </nav>
-        <button className="ghost-button" onClick={onLogout}>
-          <LogOut size={18} />
-          Logout
-        </button>
+        <div className="side-foot">
+          {actionCenter.missing_shortlist_data ? (
+            <p className="side-nudge">{actionCenter.missing_shortlist_data} openings are missing shortlist data — the biggest blind spot in the funnel.</p>
+          ) : null}
+          <button className="ghost-button" onClick={onLogout}>
+            <LogOut size={18} />
+            Logout
+          </button>
+        </div>
       </aside>
 
       <section className="dashboard-main">
@@ -1539,132 +1578,263 @@ function AdminDashboard({ adminToken, onLogout, route = [], navigate = () => {} 
           />
         ) : (
         <>
-        <header className="topbar">
-          <div>
-            <p className="eyebrow">Admin Dashboard</p>
-            <h1>
-              {activeView === "students"
-                ? "Students"
-                : activeView === "analytics"
-                  ? "Analytics"
-                  : "Hiring Pipeline Overview"}
-            </h1>
-          </div>
-          {activeView !== "analytics" ? (
-            <button
-              className="icon-button"
-              type="button"
-              onClick={activeView === "students" ? loadStudents : loadDashboard}
-              disabled={loading || loadingStudents}
-              title="Refresh"
-            >
-              <RefreshCw className={loading || loadingStudents ? "spin" : ""} size={18} />
-            </button>
-          ) : null}
-        </header>
-
         {error ? <StatusMessage error={error} /> : null}
 
         {activeView === "analytics" ? (
-          <AdminAnalyticsView adminToken={adminToken} navigate={navigate} />
-        ) : activeView === "students" ? (
-          <AdminStudentsView students={students} loading={loadingStudents} navigate={navigate} />
-        ) : (
           <>
-            <section className="stats-grid admin-stats compact-stats">
-              <Metric icon={<UsersRound size={20} />} label="Students" value={summary.total_students ?? 0} onClick={openStudentsView} />
-              <Metric icon={<Building2 size={20} />} label="Companies" value={summary.total_companies ?? 0} />
-              <Metric icon={<BriefcaseBusiness size={20} />} label="Opportunities" value={summary.total_opportunities ?? 0} />
-            </section>
-
-            <AddCompaniesPanel adminToken={adminToken} onImported={loadDashboard} />
-
-            <section className="content-grid admin-grid">
-              <div className="panel wide">
-                <div className="panel-title">
-                  <BriefcaseBusiness size={20} />
-                  <h2>Opportunities</h2>
-                  {recentOpportunities.length ? <span className="title-count">{sortedOpportunities.length}</span> : null}
-                </div>
-
-                {recentOpportunities.length > 0 && (
-                  <div className="opportunities-controls">
-                    <div className="search-field">
-                      <input
-                        type="text"
-                        placeholder="Search by company name..."
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                        className="search-input"
-                      />
-                    </div>
-
-                    <div className="controls-row">
-                      <div className="sort-controls">
-                        <label>Sort by:</label>
-                        <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="sort-select">
-                          <option value="recent">Recent First</option>
-                          <option value="oldest">Oldest First</option>
-                          <option value="applied_desc">Most Applied</option>
-                          <option value="applied_asc">Least Applied</option>
-                          <option value="shortlisted_desc">Most Shortlisted</option>
-                          <option value="shortlisted_asc">Least Shortlisted</option>
-                          <option value="response_desc">Most Responses</option>
-                          <option value="response_asc">Least Responses</option>
-                        </select>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {loading ? (
-                  <PanelLoader />
-                ) : sortedOpportunities.length ? (
-                  <div className="admin-table opportunities-table scrollable">
-                    <div className="admin-head">
-                      <span>Company</span>
-                      <span>Role</span>
-                      <span>Counts</span>
-                      <span>Received</span>
-                    </div>
-                    {sortedOpportunities.map((opportunity) => (
-                      <div className="admin-row" key={opportunity.id}>
-                        <div>
-                          <button
-                            type="button"
-                            className="link-button"
-                            onClick={() => openCompany(opportunity.company)}
-                            title="View company detail"
-                          >
-                            {opportunity.company?.name || "Company"}
-                          </button>
-                          <span>{opportunity.location || "Location not added"}</span>
-                        </div>
-                        <div>
-                          <strong>{opportunity.role || "Role not mapped"}</strong>
-                          <span>{opportunity.tech_stack || opportunity.must_have_skills || "Skills not mapped"}</span>
-                        </div>
-                        <div>
-                          <strong>{opportunity.application_count ?? 0} applied</strong>
-                          <span>{opportunity.shortlisted_count ?? 0} shortlisted / {opportunity.response_count ?? 0} responses</span>
-                        </div>
-                        <div>
-                          <span>{formatDate(opportunity.opportunity_received_at)}</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="empty-state compact"><p>{searchTerm ? "No opportunities match your search." : "No opportunities found."}</p></div>
-                )}
-              </div>
-            </section>
+            <header className="topbar">
+              <div><p className="eyebrow">Admin Dashboard</p><h1>Analytics</h1></div>
+            </header>
+            <AdminAnalyticsView adminToken={adminToken} navigate={navigate} />
           </>
+        ) : activeView === "students" ? (
+          <>
+            <header className="topbar">
+              <div><p className="eyebrow">Admin Dashboard</p><h1>Students</h1></div>
+              <button className="icon-button" type="button" onClick={loadStudents} disabled={loadingStudents} title="Refresh">
+                <RefreshCw className={loadingStudents ? "spin" : ""} size={18} />
+              </button>
+            </header>
+            <AdminStudentsView students={students} loading={loadingStudents} navigate={navigate} />
+          </>
+        ) : activeView === "queue" ? (
+          <AdminComingSoon title="Action queue" subtitle={`${actionTotal} items · closing the data gaps first makes every other number on this dashboard trustworthy`} note="The full working queue is the next screen to build — its counts already drive the Overview action card." onBack={backToOverview} />
+        ) : activeView === "companies" ? (
+          <AdminComingSoon title="Companies" subtitle="Per-company performance, shortlist / selection rate and the ops queue" note="Open any company from an opportunity row for its detail today; the roster view is a later phase." onBack={backToOverview} />
+        ) : activeView === "reports" ? (
+          <AdminComingSoon title="Interview reports" subtitle={`${reportsSummary.published || 0} of ${reportsSummary.reports || 0} published · ${reportsSummary.pending || 0} pending`} note="Reports publish today from each company's detail view; a dedicated list is a later phase." onBack={backToOverview} />
+        ) : (
+          <AdminOverview
+            loading={loading}
+            summary={summary}
+            funnel={funnel}
+            loss={loss}
+            actionCenter={actionCenter}
+            placement={placement}
+            reportsSummary={reportsSummary}
+            recentOpportunities={sortedOpportunities}
+            searchTerm={searchTerm}
+            setSearchTerm={setSearchTerm}
+            sortBy={sortBy}
+            setSortBy={setSortBy}
+            adminToken={adminToken}
+            onRefresh={loadDashboard}
+            openCompany={openCompany}
+            navigate={navigate}
+          />
         )}
         </>
         )}
       </section>
     </main>
+  );
+}
+
+/* --------------------------- Admin Overview --------------------------- */
+
+function LossItem({ label, n, applied, color, note, pending }) {
+  const pct = applied ? Math.round((n / applied) * 100) : 0;
+  return (
+    <div className={`ov-loss-item${pending ? " pending" : ""}`}>
+      <div className="ov-loss-top">
+        <span>{label}</span>
+        {pending ? (
+          <span className="ov-loss-pill">tracked per application</span>
+        ) : (
+          <span className="ov-loss-n"><strong>{fmt(n)}</strong><span>{pct}%</span></span>
+        )}
+      </div>
+      {!pending ? (
+        <div className="ov-loss-bar"><div style={{ width: `${Math.max(pct, 1)}%`, background: color }} /></div>
+      ) : null}
+      <p className="ov-loss-note">{note}</p>
+    </div>
+  );
+}
+
+function ShortlistCell({ applied, shortlisted }) {
+  if (shortlisted > 0) {
+    const pct = applied ? Math.round((shortlisted / applied) * 100) : 0;
+    return <span className="ov-sl good">{shortlisted}<span className="ov-sl-pct"> · {pct}%</span></span>;
+  }
+  if (!applied) return <span className="ov-sl none">no data</span>;
+  return <span className="ov-sl zero">0</span>;
+}
+
+function AdminComingSoon({ title, eyebrow = "Admin Dashboard", subtitle, note, onBack }) {
+  return (
+    <>
+      <header className="topbar">
+        <div>
+          <p className="eyebrow">{eyebrow}</p>
+          <h1>{title}</h1>
+          {subtitle ? <p className="ov-sub">{subtitle}</p> : null}
+        </div>
+      </header>
+      <div className="ov-card ov-soon">
+        <ListChecks size={26} />
+        <h2>{title} — coming next</h2>
+        {note ? <p>{note}</p> : null}
+        <button type="button" className="sd-btn-soft" style={{ maxWidth: 220 }} onClick={onBack}>← Back to Overview</button>
+      </div>
+    </>
+  );
+}
+
+function AdminOverview({
+  loading, summary, funnel, loss, actionCenter, placement, reportsSummary,
+  recentOpportunities, searchTerm, setSearchTerm, sortBy, setSortBy,
+  adminToken, onRefresh, openCompany, navigate,
+}) {
+  const [openingsOpen, setOpeningsOpen] = useState(true);
+  const applied = funnel[0]?.n || 0;
+  const stageColor = { interviewing: "#d97706", placed: "#166534" };
+  const actionRows = [
+    { key: "missing_shortlist_data", label: "Openings missing shortlist data", tone: "teal", to: ["admin", "queue"] },
+    { key: "profiles_requested_not_shared", label: "Profiles requested but not shared", tone: "teal", to: ["admin", "queue"] },
+    { key: "reports_unpublished", label: "Interview reports not yet published", tone: "warn", to: ["admin", "reports"] },
+    { key: "interviewed_no_report", label: "Interviewed but no report generated", tone: "teal", to: ["admin", "reports"] },
+    { key: "inactive_30d", label: "Students inactive 30+ days", tone: "bad", to: ["admin", "students"] },
+  ];
+  return (
+    <div className="ov">
+      <header className="ov-head">
+        <div>
+          <p className="eyebrow">Admin dashboard</p>
+          <h1>Placement pipeline</h1>
+          <p className="ov-sub">
+            {placement.rate ?? 0}% placed · {placement.placed ?? 0} of {placement.total_students ?? 0} students · {fmt(summary.response_count)} applications across {fmt(summary.total_opportunities)} openings
+          </p>
+        </div>
+        <button className="icon-button" type="button" onClick={onRefresh} disabled={loading} title="Refresh">
+          <RefreshCw className={loading ? "spin" : ""} size={18} />
+        </button>
+      </header>
+
+      <AddCompaniesPanel adminToken={adminToken} onImported={onRefresh} />
+
+      <section className="ov-card">
+        <div className="ov-card-head">
+          <div>
+            <h2>Where the {fmt(applied)} applications stand</h2>
+            <p className="ov-muted">Every stage shows its share of all applications and the drop from the stage above it.</p>
+          </div>
+        </div>
+        <div className="ov-funnel">
+          {funnel.map((s, i) => {
+            const pct = applied ? (s.n / applied) * 100 : 0;
+            const prev = funnel[i - 1];
+            const lost = prev ? prev.n - s.n : 0;
+            const dropPct = applied ? Math.round((lost / applied) * 100) : 0;
+            const color = stageColor[s.key] || "#0f766e";
+            return (
+              <React.Fragment key={s.key}>
+                {prev && lost > 0 ? (
+                  <div className="ov-funnel-drop"><span className="ov-drop">↓ {fmt(lost)} dropped off · −{dropPct}%</span></div>
+                ) : null}
+                <div className="ov-funnel-row">
+                  <div className="ov-funnel-label"><span>{s.label}</span><span className="ov-muted-xs">{s.sub}</span></div>
+                  <div className="ov-bar"><div style={{ width: `${Math.max(pct, 1.5)}%`, background: color }} /></div>
+                  <div className="ov-funnel-val"><strong>{fmt(s.n)}</strong><span>{pct >= 10 ? Math.round(pct) : pct.toFixed(1)}%</span></div>
+                </div>
+              </React.Fragment>
+            );
+          })}
+        </div>
+        <p className="ov-foot">Interested is derived from the opt-in rate on dated applications; Selected / joined covers offer-accepted, selected and joined since they aren't stored separately.</p>
+      </section>
+
+      <div className="ov-grid2">
+        <section className="ov-card">
+          <h2>Where we lose people</h2>
+          <p className="ov-muted">Slices of the {fmt(applied)} applications. Neither is a rejection, and they can overlap.</p>
+          <div className="ov-loss">
+            <LossItem label="Dropped — student declined" n={loss.dropped} applied={applied} color="#94a3b8" note="The student turned the opening down — role fit, location or timing. Worth asking why before mapping them again." />
+            <LossItem label="Awaiting company response" n={loss.awaiting} applied={applied} color="#f59e0b" note="Still at Applied with no decision recorded. Stalled, not lost — this is the pile the action queue chases." />
+            <LossItem label="Not shortlisted — resume screen" n={loss.not_shortlisted} applied={applied} color="#b42318" note="A resume-stage pass with the company's note attached where they gave one — never a failed interview." />
+          </div>
+        </section>
+
+        <section className="ov-card">
+          <div className="ov-card-head-row">
+            <h2>Needs action today</h2>
+            <button type="button" className="ov-link" onClick={() => navigate(["admin", "queue"])}>Open queue →</button>
+          </div>
+          <div className="ov-actions">
+            {actionRows.map((r) => (
+              <button key={r.key} type="button" className="ov-action" onClick={() => navigate(r.to)}>
+                <span className="ov-action-label">{r.label}</span>
+                <span className={`ov-count ${r.tone}`}>{actionCenter[r.key] ?? 0}</span>
+                <ChevronRight size={17} className="ov-action-caret" />
+              </button>
+            ))}
+          </div>
+          <div className="ov-mini">
+            <div><span className="ov-mini-k">Placed</span><span className="ov-mini-v"><strong>{placement.placed ?? 0}</strong> of {placement.total_students ?? 0}</span></div>
+            <div><span className="ov-mini-k">Reports out</span><span className="ov-mini-v"><strong>{reportsSummary.published ?? 0}</strong> of {reportsSummary.reports ?? 0}</span></div>
+            <div><span className="ov-mini-k">Questions</span><span className="ov-mini-v"><strong>{fmt(reportsSummary.questions)}</strong> banked</span></div>
+          </div>
+        </section>
+      </div>
+
+      <section className="ov-card">
+        <button type="button" className="ov-fold" onClick={() => setOpeningsOpen((v) => !v)} aria-expanded={openingsOpen}>
+          <h2>Latest openings received</h2>
+          {recentOpportunities.length ? <span className="ov-muted">{recentOpportunities.length} of {fmt(summary.total_opportunities)}</span> : null}
+          <span className="ov-fold-caret">{openingsOpen ? <ChevronUp size={18} /> : <ChevronDown size={18} />}</span>
+        </button>
+        {openingsOpen ? (
+          <>
+            {recentOpportunities.length ? (
+              <div className="opportunities-controls">
+                <div className="search-field">
+                  <input type="text" placeholder="Search by company name…" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="search-input" />
+                </div>
+                <div className="controls-row">
+                  <div className="sort-controls">
+                    <label>Sort by:</label>
+                    <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="sort-select">
+                      <option value="recent">Recent First</option>
+                      <option value="oldest">Oldest First</option>
+                      <option value="applied_desc">Most Applied</option>
+                      <option value="applied_asc">Least Applied</option>
+                      <option value="shortlisted_desc">Most Shortlisted</option>
+                      <option value="shortlisted_asc">Least Shortlisted</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+            {loading ? (
+              <PanelLoader />
+            ) : recentOpportunities.length ? (
+              <div className="ov-table-scroll">
+                <div className="ov-table">
+                  <div className="ov-thead"><span>Company</span><span>Role</span><span>Applied</span><span>Shortlisted</span><span>Received</span></div>
+                  {recentOpportunities.map((o) => (
+                    <div className="ov-trow" key={o.id}>
+                      <div className="ov-cell">
+                        <button type="button" className="link-button" onClick={() => openCompany(o.company)} title="View company detail">{o.company?.name || "Company"}</button>
+                        <span>{o.location || "—"}</span>
+                      </div>
+                      <div className="ov-cell">
+                        <strong>{o.role || "Role not mapped"}</strong>
+                        <span>{o.tech_stack || o.must_have_skills || "—"}</span>
+                      </div>
+                      <span className="ov-applied">{o.application_count ?? 0}</span>
+                      <ShortlistCell applied={o.application_count ?? 0} shortlisted={o.shortlisted_count ?? 0} />
+                      <span className="ov-date">{formatDate(o.opportunity_received_at)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="empty-state compact"><p>{searchTerm ? "No openings match your search." : "No openings yet."}</p></div>
+            )}
+          </>
+        ) : null}
+      </section>
+    </div>
   );
 }
 
@@ -1674,9 +1844,12 @@ const STATUS_META = {
   APPLIED: { label: "Applied", color: "#3b82f6" },
   PROFILE_SHARED: { label: "Profile shared", color: "#6366f1" },
   SHORTLISTED: { label: "Shortlisted", color: "#0f766e" },
-  NOT_SHORTLISTED: { label: "Not shortlisted", color: "#94a3b8" },
+  NOT_SHORTLISTED: { label: "Not shortlisted", color: "#b42318" },
+  WAITLISTED: { label: "Waitlisted", color: "#7c3aed" },
   INTERVIEW_SCHEDULED: { label: "Interview scheduled", color: "#d97706" },
   INTERVIEW_IN_PROGRESS: { label: "Interview in progress", color: "#f59e0b" },
+  INTERVIEW_COMPLETED: { label: "Interview done · awaiting result", color: "#d97706" },
+  INTERVIEW_NOT_ATTENDED: { label: "Interview not attended", color: "#b42318" },
   SELECTED: { label: "Selected", color: "#15803d" },
   JOINED: { label: "Joined", color: "#166534" },
   OFFER_PENDING: { label: "Offer pending", color: "#0ea5e9" },
@@ -1871,6 +2044,8 @@ function AdminAnalyticsView({ adminToken, navigate = () => {} }) {
   const [error, setError] = useState("");
   const [openStudent, setOpenStudent] = useState(null);
   const [openCategory, setOpenCategory] = useState(null);
+  const [studentSearch, setStudentSearch] = useState("");
+  const [studentSort, setStudentSort] = useState({ key: "apps", dir: "desc" });
 
   useEffect(() => {
     let live = true;
@@ -1889,6 +2064,27 @@ function AdminAnalyticsView({ adminToken, navigate = () => {} }) {
       live = false;
     };
   }, [range.start, range.end, adminToken]);
+
+  // Active-students table: name search + sort by Applied / Shortlisted count.
+  const activeStudents = useMemo(() => {
+    const q = studentSearch.trim().toLowerCase();
+    const rows = (data?.top_students || []).filter((s) => !q || (s.name || "").toLowerCase().includes(q));
+    const { key, dir } = studentSort;
+    const mul = dir === "asc" ? 1 : -1;
+    return [...rows].sort((a, b) => {
+      if (key === "name") return mul * (a.name || "").localeCompare(b.name || "");
+      const av = key === "shortlisted" ? a.shortlisted ?? 0 : a.apps ?? 0;
+      const bv = key === "shortlisted" ? b.shortlisted ?? 0 : b.apps ?? 0;
+      return mul * (av - bv);
+    });
+  }, [data, studentSearch, studentSort]);
+
+  function toggleStudentSort(key) {
+    setOpenStudent(null);
+    setStudentSort((prev) =>
+      prev.key === key ? { key, dir: prev.dir === "desc" ? "asc" : "desc" } : { key, dir: key === "name" ? "asc" : "desc" }
+    );
+  }
 
   const kpis = data?.kpis || {};
   const statusItems = (data?.status || []).map((s) => ({ key: s.key, label: statusMeta(s.key).label, color: statusMeta(s.key).color, n: s.n }));
@@ -2019,71 +2215,103 @@ function AdminAnalyticsView({ adminToken, navigate = () => {} }) {
           <section className="panel wide">
             <div className="panel-title">
               <Trophy size={18} />
-              <h2>Most active students</h2>
-              <span className="title-hint">click a row for their companies</span>
+              <h2>Active students</h2>
+              {data.top_students.length ? <span className="title-count">{data.top_students.length}</span> : null}
+              <span className="title-hint">applied to 2+ openings in range · click a row for their companies</span>
             </div>
             {data.top_students.length ? (
-              <div className="admin-table analytics-table">
-                <div className="admin-head">
-                  <span>Student</span>
-                  <span>Applied</span>
-                  <span>Shortlisted</span>
+              <>
+                <div className="student-filter">
+                  <span className="sd-search">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#98a2b3" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg>
+                    <input
+                      placeholder="Search student name…"
+                      value={studentSearch}
+                      onChange={(e) => { setStudentSearch(e.target.value); setOpenStudent(null); }}
+                    />
+                  </span>
+                  <span className="student-filter-count">{activeStudents.length} shown</span>
                 </div>
-                {data.top_students.map((s, i) => (
-                  <React.Fragment key={i}>
-                    <div
-                      className={`admin-row analytics-student ${openStudent === i ? "is-open" : ""}`}
-                      onClick={() => setOpenStudent(openStudent === i ? null : i)}
+                <div className="admin-table analytics-table scrollable">
+                  <div className="admin-head">
+                    <span>Student</span>
+                    <button
+                      type="button"
+                      className={`sort-th ${studentSort.key === "apps" ? "on" : ""}`}
+                      onClick={() => toggleStudentSort("apps")}
                     >
-                      <div className="student-name-cell">
-                        <ChevronRight size={15} className="row-caret" />
-                        {s.id ? (
-                          <button
-                            type="button"
-                            className="link-button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              navigate(["admin", "student", s.id]);
-                            }}
-                          >
-                            {s.name}
-                          </button>
-                        ) : (
-                          <strong>{s.name}</strong>
-                        )}
-                      </div>
-                      <div><span className="mini-count">{s.apps}</span></div>
-                      <div><span className="mini-count good">{s.shortlisted}</span></div>
-                    </div>
-                    {openStudent === i ? (
-                      <div className="student-expand">
-                        <div className="student-expand-head">
-                          <span>Companies applied in this range</span>
-                        </div>
-                        {s.applications?.length ? (
-                          <div className="expand-list">
-                            {s.applications.map((a, j) => (
-                              <div className="expand-row" key={j}>
-                                <div className="expand-company">
-                                  <strong>{a.company}</strong>
-                                  <span>{a.role}</span>
-                                </div>
-                                <div className="expand-status">
-                                  <StatusChip status={a.status} />
-                                  <span className="date-line"><CalendarClock size={13} />{formatDate(a.applied_at)}</span>
-                                </div>
-                                <span className="cat-tag">{a.category}</span>
-                              </div>
-                            ))}
+                      Applied{studentSort.key === "apps" ? (studentSort.dir === "desc" ? " ↓" : " ↑") : ""}
+                    </button>
+                    <button
+                      type="button"
+                      className={`sort-th ${studentSort.key === "shortlisted" ? "on" : ""}`}
+                      onClick={() => toggleStudentSort("shortlisted")}
+                    >
+                      Shortlisted{studentSort.key === "shortlisted" ? (studentSort.dir === "desc" ? " ↓" : " ↑") : ""}
+                    </button>
+                  </div>
+                  {activeStudents.length ? activeStudents.map((s, i) => {
+                    const rowKey = s.id || s.name || i;
+                    return (
+                      <React.Fragment key={rowKey}>
+                        <div
+                          className={`admin-row analytics-student ${openStudent === rowKey ? "is-open" : ""}`}
+                          onClick={() => setOpenStudent(openStudent === rowKey ? null : rowKey)}
+                        >
+                          <div className="student-name-cell">
+                            <ChevronRight size={15} className="row-caret" />
+                            {s.id ? (
+                              <button
+                                type="button"
+                                className="link-button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  navigate(["admin", "student", s.id]);
+                                }}
+                              >
+                                {s.name}
+                              </button>
+                            ) : (
+                              <strong>{s.name}</strong>
+                            )}
                           </div>
-                        ) : (
-                          <p className="expand-empty">No applications in this range.</p>
-                        )}
-                      </div>
-                    ) : null}
-                  </React.Fragment>
-                ))}
-              </div>
+                          <div><span className="mini-count">{s.apps}</span></div>
+                          <div><span className="mini-count good">{s.shortlisted}</span></div>
+                        </div>
+                        {openStudent === rowKey ? (
+                          <div className="student-expand">
+                            <div className="student-expand-head">
+                              <span>Companies applied in this range</span>
+                            </div>
+                            {s.applications?.length ? (
+                              <div className="expand-list">
+                                {s.applications.map((a, j) => (
+                                  <div className="expand-row" key={j}>
+                                    <div className="expand-company">
+                                      <strong>{a.company}</strong>
+                                      <span>{a.role}</span>
+                                      {a.remark ? <span className="expand-remark">“{a.remark}”</span> : null}
+                                    </div>
+                                    <div className="expand-status">
+                                      <StatusChip status={a.status} />
+                                      <span className="date-line"><CalendarClock size={13} />{formatDate(a.applied_at)}</span>
+                                    </div>
+                                    <span className="cat-tag">{a.category}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="expand-empty">No applications in this range.</p>
+                            )}
+                          </div>
+                        ) : null}
+                      </React.Fragment>
+                    );
+                  }) : (
+                    <p className="chart-empty">No students match “{studentSearch}”.</p>
+                  )}
+                </div>
+              </>
             ) : (
               <p className="chart-empty">No data.</p>
             )}
