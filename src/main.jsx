@@ -419,11 +419,15 @@ function AuthScreen({ authView, setAuthView, onAuthenticated, onAdminMode }) {
 }
 
 function AdminAccess({ onAuthenticated, onStudentMode }) {
-  const [email, setEmail] = useState("admin@2931");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  // Set when the admin logs in with a temp password and must choose their own.
+  const [resetToken, setResetToken] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -433,6 +437,39 @@ function AdminAccess({ onAuthenticated, onStudentMode }) {
       const data = await apiRequest("/auth/admin-login", {
         method: "POST",
         body: { email, password },
+      });
+      if (data.reset_token) {
+        setResetToken(data.reset_token);
+      } else {
+        onAuthenticated(data.access_token);
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleSetPassword(event) {
+    event.preventDefault();
+    setError("");
+    if (newPassword.length < 8) {
+      setError("Password must be at least 8 characters.");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setError("Passwords do not match.");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await apiRequest("/auth/set-password", {
+        method: "POST",
+        body: { reset_token: resetToken, new_password: newPassword },
+      });
+      const data = await apiRequest("/auth/admin-login", {
+        method: "POST",
+        body: { email, password: newPassword },
       });
       onAuthenticated(data.access_token);
     } catch (err) {
@@ -451,46 +488,85 @@ function AdminAccess({ onAuthenticated, onStudentMode }) {
           </span>
           <div>
             <h1>Admin Dashboard</h1>
-            <p>Track students, company opportunities, applications, and shortlists.</p>
+            <p>{resetToken ? "First time in — set your own password to finish signing in." : "Track students, company opportunities, applications, and shortlists."}</p>
           </div>
         </div>
-        <button className="mode-switch" type="button" onClick={onStudentMode}>
-          <UserRound size={17} />
-          Student login
-        </button>
-        <form className="auth-form" onSubmit={handleSubmit}>
-          <label>
-            <span>Email</span>
-            <input
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              placeholder="admin@2931"
-              autoComplete="username"
-              required
-            />
-          </label>
-          <label>
-            <span>Password</span>
-            <div className="password-input">
+        {resetToken ? (
+          <form className="auth-form" onSubmit={handleSetPassword}>
+            <label>
+              <span>New password</span>
+              <div className="password-input">
+                <input
+                  value={newPassword}
+                  onChange={(event) => setNewPassword(event.target.value)}
+                  placeholder="At least 8 characters"
+                  type={showPassword ? "text" : "password"}
+                  autoComplete="new-password"
+                  required
+                />
+                <button type="button" onClick={() => setShowPassword((value) => !value)} aria-label="Toggle password">
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
+            </label>
+            <label>
+              <span>Confirm password</span>
               <input
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                placeholder="Admin password"
+                value={confirmPassword}
+                onChange={(event) => setConfirmPassword(event.target.value)}
+                placeholder="Re-enter password"
                 type={showPassword ? "text" : "password"}
-                autoComplete="current-password"
+                autoComplete="new-password"
                 required
               />
-              <button type="button" onClick={() => setShowPassword((value) => !value)} aria-label="Toggle password">
-                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+            </label>
+            <StatusMessage error={error} />
+            <button className="primary-button" type="submit" disabled={submitting}>
+              {submitting ? <Loader2 className="spin" size={18} /> : <ArrowRight size={18} />}
+              Set password & continue
+            </button>
+          </form>
+        ) : (
+          <>
+            <button className="mode-switch" type="button" onClick={onStudentMode}>
+              <UserRound size={17} />
+              Student login
+            </button>
+            <form className="auth-form" onSubmit={handleSubmit}>
+              <label>
+                <span>Email</span>
+                <input
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  placeholder="you@company.com"
+                  autoComplete="username"
+                  required
+                />
+              </label>
+              <label>
+                <span>Password</span>
+                <div className="password-input">
+                  <input
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    placeholder="Your password"
+                    type={showPassword ? "text" : "password"}
+                    autoComplete="current-password"
+                    required
+                  />
+                  <button type="button" onClick={() => setShowPassword((value) => !value)} aria-label="Toggle password">
+                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
+              </label>
+              <StatusMessage error={error} />
+              <button className="primary-button" type="submit" disabled={submitting}>
+                {submitting ? <Loader2 className="spin" size={18} /> : <ArrowRight size={18} />}
+                Open Dashboard
               </button>
-            </div>
-          </label>
-          <StatusMessage error={error} />
-          <button className="primary-button" type="submit" disabled={submitting}>
-            {submitting ? <Loader2 className="spin" size={18} /> : <ArrowRight size={18} />}
-            Open Dashboard
-          </button>
-        </form>
+            </form>
+          </>
+        )}
       </section>
     </main>
   );
@@ -1422,7 +1498,7 @@ function AdminDashboard({ adminToken, onLogout, route = [], navigate = () => {} 
   const [students, setStudents] = useState([]);
   // Navigation lives in the URL: #/admin, #/admin/students,
   // #/admin/company/<id>[/opp/<id>]. A refresh therefore lands where you were.
-  const KNOWN_VIEWS = ["students", "analytics", "student", "company", "queue", "companies", "reports"];
+  const KNOWN_VIEWS = ["students", "analytics", "student", "company", "reports"];
   const activeView = KNOWN_VIEWS.includes(route[1]) ? route[1] : "overview";
   const companyId = route[1] === "company" ? route[2] || null : null;
   const studentId = route[1] === "student" ? route[2] || null : null;
@@ -1528,15 +1604,8 @@ function AdminDashboard({ adminToken, onLogout, route = [], navigate = () => {} 
           <button className={activeView === "overview" ? "active" : ""} type="button" onClick={backToOverview}>
             <BarChart3 size={18} /> Overview
           </button>
-          <button className={activeView === "queue" ? "active" : ""} type="button" onClick={() => navigate(["admin", "queue"])}>
-            <ListChecks size={18} /> Action queue
-            {actionTotal ? <span className="side-badge">{actionTotal}</span> : null}
-          </button>
           <button className={activeView === "students" ? "active" : ""} type="button" onClick={openStudentsView}>
             <UsersRound size={18} /> Students
-          </button>
-          <button className={activeView === "companies" ? "active" : ""} type="button" onClick={() => navigate(["admin", "companies"])}>
-            <Building2 size={18} /> Companies
           </button>
           <button className={activeView === "reports" ? "active" : ""} type="button" onClick={() => navigate(["admin", "reports"])}>
             <FileText size={18} /> Interview reports
@@ -1597,12 +1666,8 @@ function AdminDashboard({ adminToken, onLogout, route = [], navigate = () => {} 
             </header>
             <AdminStudentsView students={students} loading={loadingStudents} navigate={navigate} />
           </>
-        ) : activeView === "queue" ? (
-          <AdminComingSoon title="Action queue" subtitle={`${actionTotal} items · closing the data gaps first makes every other number on this dashboard trustworthy`} note="The full working queue is the next screen to build — its counts already drive the Overview action card." onBack={backToOverview} />
-        ) : activeView === "companies" ? (
-          <AdminComingSoon title="Companies" subtitle="Per-company performance, shortlist / selection rate and the ops queue" note="Open any company from an opportunity row for its detail today; the roster view is a later phase." onBack={backToOverview} />
         ) : activeView === "reports" ? (
-          <AdminComingSoon title="Interview reports" subtitle={`${reportsSummary.published || 0} of ${reportsSummary.reports || 0} published · ${reportsSummary.pending || 0} pending`} note="Reports publish today from each company's detail view; a dedicated list is a later phase." onBack={backToOverview} />
+          <AdminReportsView adminToken={adminToken} reportsSummary={reportsSummary} navigate={navigate} />
         ) : (
           <AdminOverview
             loading={loading}
@@ -1681,6 +1746,106 @@ function AdminComingSoon({ title, eyebrow = "Admin Dashboard", subtitle, note, o
   );
 }
 
+function AdminReportsView({ adminToken, reportsSummary = {} }) {
+  const [reports, setReports] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [filter, setFilter] = useState("all");
+  const [openId, setOpenId] = useState(null);
+  const [busyId, setBusyId] = useState(null);
+
+  function load() {
+    setLoading(true);
+    setError("");
+    apiRequest("/admin/reports", { adminToken })
+      .then((data) => setReports(Array.isArray(data) ? data : []))
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  }
+  useEffect(load, [adminToken]);
+
+  async function toggle(report, event) {
+    event.stopPropagation();
+    setBusyId(report.id);
+    try {
+      await apiRequest(`/admin/reports/${report.id}/visibility`, {
+        method: "PATCH",
+        adminToken,
+        body: { visible_to_student: !report.visible_to_student },
+      });
+      setReports((rs) => rs.map((r) => (r.id === report.id ? { ...r, visible_to_student: !r.visible_to_student } : r)));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  const filtered = reports.filter((r) =>
+    filter === "all" ? true : filter === "published" ? r.visible_to_student : !r.visible_to_student
+  );
+
+  return (
+    <>
+      <header className="topbar">
+        <div>
+          <p className="eyebrow">Admin Dashboard</p>
+          <h1>Interview reports</h1>
+          <p className="ov-sub">
+            {reportsSummary.published ?? 0} of {reportsSummary.reports ?? reports.length} published · {reportsSummary.pending ?? 0} pending
+          </p>
+        </div>
+        <button className="icon-button" type="button" onClick={load} disabled={loading} title="Refresh">
+          <RefreshCw className={loading ? "spin" : ""} size={18} />
+        </button>
+      </header>
+
+      {error ? <StatusMessage error={error} /> : null}
+
+      <div className="rep-tabs">
+        {[["all", "All"], ["pending", "Pending"], ["published", "Published"]].map(([k, l]) => (
+          <button key={k} type="button" className={`rep-tab ${filter === k ? "on" : ""}`} onClick={() => setFilter(k)}>{l}</button>
+        ))}
+      </div>
+
+      {loading ? (
+        <PanelLoader />
+      ) : !filtered.length ? (
+        <div className="empty-state compact"><p>No interview reports{filter !== "all" ? ` (${filter})` : ""} yet.</p></div>
+      ) : (
+        <div className="rep-list">
+          {filtered.map((r) => (
+            <div className={`rep-item ${openId === r.id ? "open" : ""}`} key={r.id}>
+              <div className="rep-row" onClick={() => setOpenId(openId === r.id ? null : r.id)}>
+                <span className="rep-caret">{openId === r.id ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</span>
+                <span className="rep-main">
+                  <strong>{r.student?.name || "Student"}</strong>
+                  <span className="rep-sub">{r.company || "Company"} · {r.role || "—"}</span>
+                </span>
+                <span className={`vis-badge ${r.visible_to_student ? "on" : ""}`}>{r.visible_to_student ? "Shared" : "Pending"}</span>
+                <span className="rep-date">{formatDate(r.generated_at)}</span>
+                <button
+                  type="button"
+                  className={`rep-pub ${r.visible_to_student ? "unpub" : "pub"}`}
+                  disabled={busyId === r.id}
+                  onClick={(e) => toggle(r, e)}
+                >
+                  {busyId === r.id ? "…" : r.visible_to_student ? "Unpublish" : "Publish"}
+                </button>
+              </div>
+              {openId === r.id ? (
+                <div className="rep-body">
+                  <AdminInterviewReportCard report={r} />
+                </div>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
 function AdminOverview({
   loading, summary, funnel, loss, actionCenter, placement, reportsSummary,
   recentOpportunities, searchTerm, setSearchTerm, sortBy, setSortBy,
@@ -1690,8 +1855,8 @@ function AdminOverview({
   const applied = funnel[0]?.n || 0;
   const stageColor = { interviewing: "#d97706", placed: "#166534" };
   const actionRows = [
-    { key: "missing_shortlist_data", label: "Openings missing shortlist data", tone: "teal", to: ["admin", "queue"] },
-    { key: "profiles_requested_not_shared", label: "Profiles requested but not shared", tone: "teal", to: ["admin", "queue"] },
+    { key: "missing_shortlist_data", label: "Openings missing shortlist data", tone: "teal", to: null },
+    { key: "profiles_requested_not_shared", label: "Profiles requested but not shared", tone: "teal", to: null },
     { key: "reports_unpublished", label: "Interview reports not yet published", tone: "warn", to: ["admin", "reports"] },
     { key: "interviewed_no_report", label: "Interviewed but no report generated", tone: "teal", to: ["admin", "reports"] },
     { key: "inactive_30d", label: "Students inactive 30+ days", tone: "bad", to: ["admin", "students"] },
@@ -1758,14 +1923,18 @@ function AdminOverview({
         <section className="ov-card">
           <div className="ov-card-head-row">
             <h2>Needs action today</h2>
-            <button type="button" className="ov-link" onClick={() => navigate(["admin", "queue"])}>Open queue →</button>
           </div>
           <div className="ov-actions">
             {actionRows.map((r) => (
-              <button key={r.key} type="button" className="ov-action" onClick={() => navigate(r.to)}>
+              <button
+                key={r.key}
+                type="button"
+                className={`ov-action ${r.to ? "" : "static"}`}
+                onClick={() => r.to && navigate(r.to)}
+              >
                 <span className="ov-action-label">{r.label}</span>
                 <span className={`ov-count ${r.tone}`}>{actionCenter[r.key] ?? 0}</span>
-                <ChevronRight size={17} className="ov-action-caret" />
+                {r.to ? <ChevronRight size={17} className="ov-action-caret" /> : <span className="ov-action-caret" />}
               </button>
             ))}
           </div>

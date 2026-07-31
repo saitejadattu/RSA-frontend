@@ -3101,6 +3101,61 @@ input:focus {
 .ov-soon h2 { margin: 0; }
 .ov-soon p { margin: 0; font-size: 13.5px; line-height: 1.6; color: #667085; max-width: 620px; }
 
+/* action row with no drill-in target (queue/companies hidden) */
+.ov-action.static { cursor: default; }
+.ov-action.static:hover { background: transparent; }
+
+/* ===================== Admin Interview reports ===================== */
+.rep-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+.rep-tab {
+  border: 1px solid #e6ebea;
+  background: #fff;
+  border-radius: 999px;
+  padding: 7px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #475467;
+  cursor: pointer;
+}
+.rep-tab.on { border-color: #0f766e; color: #0f766e; background: #effefb; }
+
+.rep-list { display: grid; gap: 10px; }
+.rep-item {
+  background: #fff;
+  border: 1px solid #e6ebea;
+  border-radius: 12px;
+  box-shadow: var(--wk-shadow-xs, 0 1px 2px rgba(16, 24, 40, 0.05));
+  overflow: hidden;
+}
+.rep-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  cursor: pointer;
+}
+.rep-row:hover { background: #fafbfb; }
+.rep-caret { flex: none; display: flex; color: #98a2b3; }
+.rep-main { flex: 1 1 auto; min-width: 0; display: grid; gap: 2px; }
+.rep-main strong { font-size: 14px; font-weight: 600; color: #101828; }
+.rep-sub { font-size: 12.5px; color: #667085; overflow-wrap: anywhere; }
+.rep-date { flex: none; font-size: 12.5px; color: #98a2b3; white-space: nowrap; }
+.rep-pub {
+  flex: none;
+  border: 1px solid #bfe5d1;
+  background: #e8f6ef;
+  color: #0f766e;
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.rep-pub:hover { background: #d7efe4; }
+.rep-pub.unpub { border-color: #e6ebea; background: #f2f4f7; color: #475467; }
+.rep-pub:disabled { opacity: 0.6; cursor: default; }
+.rep-body { padding: 4px 16px 16px; border-top: 1px solid #eef1f1; }
+
 @media (max-width: 900px) {
   .ov-grid2 { grid-template-columns: 1fr; }
   .ov-funnel-row { grid-template-columns: 120px 1fr 96px; }
