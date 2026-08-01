@@ -107,6 +107,11 @@ async function apiRequest(path, { method = "GET", body, token, adminToken } = {}
   }
 
   if (!response.ok) {
+    // A 401 on an authenticated request means the token expired/was revoked.
+    // Signal the app so it can show the session-expired screen.
+    if (response.status === 401) {
+      window.dispatchEvent(new CustomEvent("auth:expired"));
+    }
     throw new Error(data?.detail || "Something went wrong");
   }
 
@@ -127,6 +132,18 @@ function App() {
   const [student, setStudent] = useState(null);
   const [loadingStudent, setLoadingStudent] = useState(Boolean(token) && mode === "student");
   const [authView, setAuthView] = useState("login");
+  const [sessionExpired, setSessionExpired] = useState(false);
+
+  // Any 401 while we hold a token means the session expired mid-use.
+  useEffect(() => {
+    function onExpired() {
+      if (localStorage.getItem(ACCESS_TOKEN_KEY) || localStorage.getItem(ADMIN_TOKEN_KEY)) {
+        setSessionExpired(true);
+      }
+    }
+    window.addEventListener("auth:expired", onExpired);
+    return () => window.removeEventListener("auth:expired", onExpired);
+  }, []);
 
   // Follow Back/Forward between the two modes.
   useEffect(() => {
@@ -196,6 +213,22 @@ function App() {
     navigate([next]);
   }
 
+  // Clear the expired session and drop back to the right login page.
+  function goToLoginAfterExpiry() {
+    localStorage.removeItem(ACCESS_TOKEN_KEY);
+    localStorage.removeItem(ADMIN_TOKEN_KEY);
+    setToken(null);
+    setAdminToken(null);
+    setStudent(null);
+    setSessionExpired(false);
+    setAuthView("login");
+    navigate([mode === "admin" ? "admin" : "student"], { replace: true });
+  }
+
+  if (sessionExpired) {
+    return <SessionExpired onLogin={goToLoginAfterExpiry} />;
+  }
+
   if (loadingStudent) {
     return <LoadingScreen />;
   }
@@ -240,6 +273,22 @@ function LoadingScreen() {
   return (
     <main className="app-shell centered">
       <Loader2 className="spin" size={28} />
+    </main>
+  );
+}
+
+function SessionExpired({ onLogin }) {
+  return (
+    <main className="session-expired">
+      <div className="session-card">
+        <span className="session-icon"><KeyRound size={26} /></span>
+        <h1>Session expired</h1>
+        <p>Your session has expired. Please log in again to continue.</p>
+        <button type="button" className="primary-button" onClick={onLogin}>
+          <LogOut size={18} />
+          Log in again
+        </button>
+      </div>
     </main>
   );
 }
@@ -1385,10 +1434,25 @@ function StudentDashboard({ student, token, onLogout, route = [], navigate = () 
   );
 }
 
-function PanelLoader() {
+function Skeleton({ w = "100%", h = 12, r = 6, style }) {
+  return <span className="skeleton" style={{ width: w, height: h, borderRadius: r, ...style }} />;
+}
+
+// A shimmer skeleton stands in for content while it loads — used everywhere in
+// place of a spinner so the layout doesn't jump when data arrives.
+function PanelLoader({ rows = 6 }) {
   return (
-    <div className="empty-state compact">
-      <Loader2 className="spin" size={22} />
+    <div className="skeleton-list" aria-busy="true">
+      {Array.from({ length: rows }).map((_, i) => (
+        <div className="skeleton-row" key={i}>
+          <Skeleton w={22} h={22} r={6} />
+          <span className="skeleton-lines">
+            <Skeleton w="38%" h={13} />
+            <Skeleton w="58%" h={10} />
+          </span>
+          <Skeleton w={64} h={26} r={8} />
+        </div>
+      ))}
     </div>
   );
 }
@@ -2078,6 +2142,18 @@ function presetRange(preset) {
   return { start: toDateStr(new Date(now.getFullYear(), now.getMonth(), 1)), end: toDateStr(now) };
 }
 
+// "2026-07" -> { start: "2026-07-01", end: "2026-07-31" }
+function monthRangeFromYM(ym) {
+  const [y, m] = String(ym).split("-").map(Number);
+  return { start: `${y}-${pad2(m)}-01`, end: toDateStr(new Date(y, m, 0)) };
+}
+
+function monthLabel(ym) {
+  const [y, m] = String(ym).split("-").map(Number);
+  const mo = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][(m || 1) - 1];
+  return `${mo} ${y}`;
+}
+
 function DateRangeControl({ preset, range, onPreset, onCustom }) {
   const presets = [
     ["this_month", "This month"],
@@ -2215,6 +2291,9 @@ function AdminAnalyticsView({ adminToken, navigate = () => {} }) {
   const [openCategory, setOpenCategory] = useState(null);
   const [studentSearch, setStudentSearch] = useState("");
   const [studentSort, setStudentSort] = useState({ key: "apps", dir: "desc" });
+  // When "This month" has no data yet, we jump to the latest month that does.
+  const [fallbackNote, setFallbackNote] = useState("");
+  const didFallback = useRef(false);
 
   useEffect(() => {
     let live = true;
@@ -2226,13 +2305,27 @@ function AdminAnalyticsView({ adminToken, navigate = () => {} }) {
     if (range.start) q.set("start", range.start);
     if (range.end) q.set("end", range.end);
     apiRequest(`/admin/analytics?${q.toString()}`, { adminToken })
-      .then((d) => live && setData(d))
+      .then((d) => {
+        if (!live) return;
+        setData(d);
+        // "This month" is empty at a month boundary — open on the newest month
+        // that actually has data instead of a blank page.
+        if (preset === "this_month" && !didFallback.current && (d.kpis?.applications ?? 0) === 0) {
+          const months = (d.by_month || []).filter((m) => m.n > 0);
+          if (months.length) {
+            const latest = months[months.length - 1];
+            didFallback.current = true;
+            setFallbackNote(`This month has no applications yet — showing ${monthLabel(latest.month)}.`);
+            setRange(monthRangeFromYM(latest.month));
+          }
+        }
+      })
       .catch((e) => live && setError(e.message))
       .finally(() => live && setLoading(false));
     return () => {
       live = false;
     };
-  }, [range.start, range.end, adminToken]);
+  }, [range.start, range.end, adminToken, preset]);
 
   // Active-students table: name search + sort by Applied / Shortlisted count.
   const activeStudents = useMemo(() => {
@@ -2266,15 +2359,20 @@ function AdminAnalyticsView({ adminToken, navigate = () => {} }) {
         preset={preset}
         range={range}
         onPreset={(p) => {
+          didFallback.current = false;
+          setFallbackNote("");
           setPreset(p);
           setRange(presetRange(p));
         }}
         onCustom={(r) => {
+          didFallback.current = false;
+          setFallbackNote("");
           setPreset("custom");
           setRange(r);
         }}
       />
 
+      {fallbackNote ? <p className="range-note">{fallbackNote}</p> : null}
       {error ? <StatusMessage error={error} /> : null}
 
       {loading || !data ? (
@@ -2657,7 +2755,7 @@ function StudentProfileView({ adminToken, studentId, navigate, onBack }) {
               </div>
             </div>
             {filtered.length ? (
-              <div className="admin-table applicants-table">
+              <div className="admin-table applicants-table scrollable">
                 <div className="admin-head">
                   <span>Company</span>
                   <span>Status</span>
@@ -4423,7 +4521,7 @@ function OpportunityDetail({ detail, adminToken, opportunityId, onRefresh }) {
 
           {applicantsOpen ? (
             filteredApplicants.length ? (
-              <div className="admin-table applicants-table">
+              <div className="admin-table applicants-table scrollable">
                 <div className="admin-head">
                   <span>Student</span>
                   <span>Status</span>
@@ -4601,7 +4699,7 @@ function AdminStudentsView({ students, loading, navigate = () => {} }) {
       )}
 
       {sortedStudents.length ? (
-        <div className="admin-table students-table">
+        <div className="admin-table students-table scrollable">
           <div className="admin-head">
             <span>Student</span>
             <span>Applied</span>
