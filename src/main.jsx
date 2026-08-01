@@ -2506,7 +2506,14 @@ function AdminInterviewReportCard({ report }) {
   const overall = report.overall || {};
   const comm = report.communication || {};
   const asList = (v) => (Array.isArray(v) ? v : v ? [v] : []);
-  const text = (x) => (typeof x === "string" ? x : x?.point || x?.note || x?.text || JSON.stringify(x));
+  // Improvements arrive as { area, detail, priority }; strengths as plain
+  // strings. Render both readably instead of dumping raw JSON.
+  const text = (x) => {
+    if (typeof x === "string") return x;
+    if (!x || typeof x !== "object") return String(x ?? "");
+    if (x.area || x.detail) return [x.area, x.detail].filter(Boolean).join(" — ");
+    return x.point || x.note || x.text || "";
+  };
   return (
     <div className="report-card">
       <div className="report-head">
@@ -4260,7 +4267,13 @@ function OpportunityDetail({ detail, adminToken, opportunityId, onRefresh }) {
   const stats = detail.stats || {};
   const applicants = detail.applicants || [];
 
-  // Filter applicants
+  // Build the status filter from the statuses that actually appear, using the
+  // real (uppercase) current_status values so the option matches the data.
+  const statusOptions = useMemo(
+    () => Array.from(new Set(applicants.map((a) => String(a.status || "").toUpperCase()).filter(Boolean))).sort(),
+    [applicants]
+  );
+
   const filteredApplicants = applicants.filter((applicant) => {
     const student = applicant.student || {};
     const searchLower = searchStudent.toLowerCase();
@@ -4268,7 +4281,7 @@ function OpportunityDetail({ detail, adminToken, opportunityId, onRefresh }) {
       (student.name || "").toLowerCase().includes(searchLower) ||
       (student.phone || "").includes(searchStudent) ||
       (student.email || "").toLowerCase().includes(searchLower);
-    const matchesStatus = filterStatus === "all" || (applicant.status || "applied") === filterStatus;
+    const matchesStatus = filterStatus === "all" || String(applicant.status || "").toUpperCase() === filterStatus;
     return matchesSearch && matchesStatus;
   });
 
@@ -4399,14 +4412,9 @@ function OpportunityDetail({ detail, adminToken, opportunityId, onRefresh }) {
                   <label>Filter by status:</label>
                   <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="sort-select">
                     <option value="all">All Status</option>
-                    <option value="applied">Applied</option>
-                    <option value="shortlisted">Shortlisted</option>
-                    <option value="rejected">Rejected</option>
-                    <option value="hired">Hired</option>
-                    <option value="dropped">Dropped</option>
-                    <option value="interview_scheduled">Interview Scheduled</option>
-                    <option value="in_progress">In Progress</option>
-                    <option value="not_interested">Not Interested</option>
+                    {statusOptions.map((s) => (
+                      <option key={s} value={s}>{statusMeta(s).label}</option>
+                    ))}
                   </select>
                 </div>
               </div>
