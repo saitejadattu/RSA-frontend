@@ -183,6 +183,8 @@ function App() {
   function handleAuthenticated(accessToken) {
     localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
     setToken(accessToken);
+    setMode("student");
+    navigate(["student"], { replace: true });
   }
 
   function handleLogout() {
@@ -233,10 +235,7 @@ function App() {
     return <LoadingScreen />;
   }
 
-  if (mode === "admin") {
-    if (!adminToken) {
-      return <AdminAccess onAuthenticated={handleAdminAuthenticated} onStudentMode={() => switchMode("student")} />;
-    }
+  if (adminToken && mode === "admin") {
     return (
       <AdminDashboard
         adminToken={adminToken}
@@ -247,15 +246,10 @@ function App() {
     );
   }
 
+  // One login for everyone: the backend routes by identifier (email -> admin,
+  // mobile number -> student) and returns the role we send them to.
   if (!token || !student) {
-    return (
-      <AuthScreen
-        authView={authView}
-        setAuthView={setAuthView}
-        onAuthenticated={handleAuthenticated}
-        onAdminMode={() => switchMode("admin")}
-      />
-    );
+    return <UnifiedLogin onStudent={handleAuthenticated} onAdmin={handleAdminAuthenticated} />;
   }
 
   return (
@@ -293,37 +287,39 @@ function SessionExpired({ onLogin }) {
   );
 }
 
-function AuthScreen({ authView, setAuthView, onAuthenticated, onAdminMode }) {
+function UnifiedLogin({ onStudent, onAdmin }) {
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [resetToken, setResetToken] = useState("");
+  const [view, setView] = useState("login");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+
+  // The backend returns the role; send them to the matching dashboard.
+  function route(data) {
+    if (!data.access_token) return;
+    if (data.role === "admin") onAdmin(data.access_token);
+    else onStudent(data.access_token);
+  }
 
   async function handleLogin(event) {
     event.preventDefault();
     setError("");
     setMessage("");
     setSubmitting(true);
-
     try {
-      const data = await apiRequest("/auth/login", {
-        method: "POST",
-        body: { identifier, password },
-      });
-
+      const data = await apiRequest("/auth/login", { method: "POST", body: { identifier, password } });
       if (data.status === "password_reset_required") {
         setResetToken(data.reset_token);
-        setAuthView("reset");
+        setView("reset");
         setMessage("Create a new password to continue.");
         return;
       }
-
-      onAuthenticated(data.access_token);
+      route(data);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -335,29 +331,23 @@ function AuthScreen({ authView, setAuthView, onAuthenticated, onAdminMode }) {
     event.preventDefault();
     setError("");
     setMessage("");
-
+    if (newPassword.length < 8) {
+      setError("Password must be at least 8 characters.");
+      return;
+    }
     if (newPassword !== confirmPassword) {
       setError("Passwords do not match");
       return;
     }
-
     setSubmitting(true);
     try {
-      await apiRequest("/auth/set-password", {
-        method: "POST",
-        body: { reset_token: resetToken, new_password: newPassword },
-      });
-
-      const data = await apiRequest("/auth/login", {
-        method: "POST",
-        body: { identifier, password: newPassword },
-      });
-
+      await apiRequest("/auth/set-password", { method: "POST", body: { reset_token: resetToken, new_password: newPassword } });
+      const data = await apiRequest("/auth/login", { method: "POST", body: { identifier, password: newPassword } });
       if (data.access_token) {
-        onAuthenticated(data.access_token);
+        route(data);
       } else {
-        setAuthView("login");
-        setMessage("Password updated. Please login again.");
+        setView("login");
+        setMessage("Password updated. Please log in again.");
       }
     } catch (err) {
       setError(err.message);
@@ -374,23 +364,19 @@ function AuthScreen({ authView, setAuthView, onAuthenticated, onAdminMode }) {
             <ShieldCheck size={24} />
           </span>
           <div>
-            <h1>Student Growth Portal</h1>
-            <p>Interview feedback, company applications, and project readiness in one place.</p>
+            <h1>RSA sign in</h1>
+            <p>sign in with your mobile number</p>
           </div>
         </div>
-        <button className="mode-switch" type="button" onClick={onAdminMode}>
-          <BarChart3 size={17} />
-          Admin dashboard
-        </button>
 
-        {authView === "login" ? (
+        {view === "login" ? (
           <form className="auth-form" onSubmit={handleLogin}>
             <label>
-              <span>Phone or email</span>
+              <span>Mobile number</span>
               <input
                 value={identifier}
                 onChange={(event) => setIdentifier(event.target.value)}
-                placeholder="Registered mobile number"
+                placeholder="Mobile number (student) or email (admin)"
                 autoComplete="username"
                 required
               />
@@ -402,7 +388,7 @@ function AuthScreen({ authView, setAuthView, onAuthenticated, onAdminMode }) {
                 <input
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
-                  placeholder="Temporary or new password"
+                  placeholder="Your password"
                   type={showPassword ? "text" : "password"}
                   autoComplete="current-password"
                   required
@@ -417,7 +403,7 @@ function AuthScreen({ authView, setAuthView, onAuthenticated, onAdminMode }) {
 
             <button className="primary-button" type="submit" disabled={submitting}>
               {submitting ? <Loader2 className="spin" size={18} /> : <ArrowRight size={18} />}
-              Login
+              Log in
             </button>
           </form>
         ) : (
@@ -425,8 +411,8 @@ function AuthScreen({ authView, setAuthView, onAuthenticated, onAdminMode }) {
             <div className="reset-header">
               <KeyRound size={22} />
               <div>
-                <h2>Create New Password</h2>
-                <p>This is required after first login or admin password reset.</p>
+                <h2>Create new password</h2>
+                <p>Required on your first login or after a password reset.</p>
               </div>
             </div>
 
@@ -458,163 +444,9 @@ function AuthScreen({ authView, setAuthView, onAuthenticated, onAdminMode }) {
 
             <button className="primary-button" type="submit" disabled={submitting || !resetToken}>
               {submitting ? <Loader2 className="spin" size={18} /> : <BadgeCheck size={18} />}
-              Save Password
+              Save password
             </button>
           </form>
-        )}
-      </section>
-    </main>
-  );
-}
-
-function AdminAccess({ onAuthenticated, onStudentMode }) {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
-  // Set when the admin logs in with a temp password and must choose their own.
-  const [resetToken, setResetToken] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-
-  async function handleSubmit(event) {
-    event.preventDefault();
-    setError("");
-    setSubmitting(true);
-    try {
-      const data = await apiRequest("/auth/admin-login", {
-        method: "POST",
-        body: { email, password },
-      });
-      if (data.reset_token) {
-        setResetToken(data.reset_token);
-      } else {
-        onAuthenticated(data.access_token);
-      }
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  async function handleSetPassword(event) {
-    event.preventDefault();
-    setError("");
-    if (newPassword.length < 8) {
-      setError("Password must be at least 8 characters.");
-      return;
-    }
-    if (newPassword !== confirmPassword) {
-      setError("Passwords do not match.");
-      return;
-    }
-    setSubmitting(true);
-    try {
-      await apiRequest("/auth/set-password", {
-        method: "POST",
-        body: { reset_token: resetToken, new_password: newPassword },
-      });
-      const data = await apiRequest("/auth/admin-login", {
-        method: "POST",
-        body: { email, password: newPassword },
-      });
-      onAuthenticated(data.access_token);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  return (
-    <main className="auth-page">
-      <section className="auth-panel">
-        <div className="auth-brand">
-          <span className="brand-mark">
-            <ShieldCheck size={24} />
-          </span>
-          <div>
-            <h1>Admin Dashboard</h1>
-            <p>{resetToken ? "First time in — set your own password to finish signing in." : "Track students, company opportunities, applications, and shortlists."}</p>
-          </div>
-        </div>
-        {resetToken ? (
-          <form className="auth-form" onSubmit={handleSetPassword}>
-            <label>
-              <span>New password</span>
-              <div className="password-input">
-                <input
-                  value={newPassword}
-                  onChange={(event) => setNewPassword(event.target.value)}
-                  placeholder="At least 8 characters"
-                  type={showPassword ? "text" : "password"}
-                  autoComplete="new-password"
-                  required
-                />
-                <button type="button" onClick={() => setShowPassword((value) => !value)} aria-label="Toggle password">
-                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                </button>
-              </div>
-            </label>
-            <label>
-              <span>Confirm password</span>
-              <input
-                value={confirmPassword}
-                onChange={(event) => setConfirmPassword(event.target.value)}
-                placeholder="Re-enter password"
-                type={showPassword ? "text" : "password"}
-                autoComplete="new-password"
-                required
-              />
-            </label>
-            <StatusMessage error={error} />
-            <button className="primary-button" type="submit" disabled={submitting}>
-              {submitting ? <Loader2 className="spin" size={18} /> : <ArrowRight size={18} />}
-              Set password & continue
-            </button>
-          </form>
-        ) : (
-          <>
-            <button className="mode-switch" type="button" onClick={onStudentMode}>
-              <UserRound size={17} />
-              Student login
-            </button>
-            <form className="auth-form" onSubmit={handleSubmit}>
-              <label>
-                <span>Email</span>
-                <input
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  placeholder="you@company.com"
-                  autoComplete="username"
-                  required
-                />
-              </label>
-              <label>
-                <span>Password</span>
-                <div className="password-input">
-                  <input
-                    value={password}
-                    onChange={(event) => setPassword(event.target.value)}
-                    placeholder="Your password"
-                    type={showPassword ? "text" : "password"}
-                    autoComplete="current-password"
-                    required
-                  />
-                  <button type="button" onClick={() => setShowPassword((value) => !value)} aria-label="Toggle password">
-                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                  </button>
-                </div>
-              </label>
-              <StatusMessage error={error} />
-              <button className="primary-button" type="submit" disabled={submitting}>
-                {submitting ? <Loader2 className="spin" size={18} /> : <ArrowRight size={18} />}
-                Open Dashboard
-              </button>
-            </form>
-          </>
         )}
       </section>
     </main>
