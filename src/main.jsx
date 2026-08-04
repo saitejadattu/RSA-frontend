@@ -17,6 +17,7 @@ import {
   FileText,
   Github,
   KeyRound,
+  Link2,
   Loader2,
   LogOut,
   RefreshCw,
@@ -1941,7 +1942,7 @@ function AdminOverview({
         <p className="ov-foot">Interested is derived from the opt-in rate on dated applications; Selected / joined covers offer-accepted, selected and joined since they aren't stored separately.</p>
       </section> */}
 
-      <div className="ov-grid2">
+      <div className="">
         <section className="ov-card">
           <h2>Where we lose people</h2>
           <p className="ov-muted">Slices of the {fmt(applied)} applications. Neither is a rejection, and they can overlap.</p>
@@ -1952,7 +1953,7 @@ function AdminOverview({
           </div>
         </section>
 
-        <section className="ov-card">
+        {/* <section className="ov-card">
           <div className="ov-card-head-row">
             <h2>Needs action today</h2>
           </div>
@@ -1975,7 +1976,7 @@ function AdminOverview({
             <div><span className="ov-mini-k">Reports out</span><span className="ov-mini-v"><strong>{reportsSummary.published ?? 0}</strong> of {reportsSummary.reports ?? 0}</span></div>
             <div><span className="ov-mini-k">Questions</span><span className="ov-mini-v"><strong>{fmt(reportsSummary.questions)}</strong> banked</span></div>
           </div>
-        </section>
+        </section> */}
       </div>
 
       <section className="ov-card">
@@ -3060,6 +3061,12 @@ const sheetApi = {
       adminToken,
       body: { url, confirm },
     }),
+  updateLinks: (adminToken, opportunityId, links) =>
+    apiRequest(`/admin/opportunities/${opportunityId}/sheet-links`, {
+      method: "PATCH",
+      adminToken,
+      body: links,
+    }),
 };
 
 const IGNORE = "__ignore__";
@@ -3686,6 +3693,43 @@ function SheetImportPanel({ adminToken, opportunityId, opportunity, onImported }
   const [skipped, setSkipped] = useState(null); // {kind, already_imported_at} when already extracted
   // Replace mode (responses only): drop candidates left over from a wrong sheet.
   const [replace, setReplace] = useState(false);
+  // Inline sheet-link editor: fix a missing / wrong URL without re-importing the
+  // whole master sheet, then Sync pulls the corrected data.
+  const [showLinks, setShowLinks] = useState(false);
+  const [respUrl, setRespUrl] = useState("");
+  const [shortUrl, setShortUrl] = useState("");
+  const [linkBusy, setLinkBusy] = useState(false);
+  const [linkMsg, setLinkMsg] = useState("");
+
+  function toggleLinks() {
+    if (!showLinks) {
+      setRespUrl(opportunity?.student_response_sheet || "");
+      setShortUrl(opportunity?.company_sheet || "");
+      setLinkMsg("");
+    }
+    setShowLinks((open) => !open);
+  }
+
+  async function saveLinks() {
+    const body = {};
+    if (respUrl.trim() !== (opportunity?.student_response_sheet || "")) body.student_response_sheet = respUrl.trim();
+    if (shortUrl.trim() !== (opportunity?.company_sheet || "")) body.company_sheet = shortUrl.trim();
+    if (!Object.keys(body).length) {
+      setLinkMsg("Nothing changed — edit a link first.");
+      return;
+    }
+    setLinkBusy(true);
+    setLinkMsg("");
+    try {
+      await sheetApi.updateLinks(adminToken, opportunityId, body);
+      setLinkMsg("Saved. Now use “Sync from sheets” to pull the updated data.");
+      onImported?.();
+    } catch (e) {
+      setLinkMsg(e.message || "Could not save the links.");
+    } finally {
+      setLinkBusy(false);
+    }
+  }
 
   function reset() {
     setPreview(null);
@@ -3814,16 +3858,61 @@ function SheetImportPanel({ adminToken, opportunityId, opportunity, onImported }
         <Upload size={20} />
         <h2>Import sheet data</h2>
         {!inSync && !preview ? (
-          <button type="button" className="rsa-sync-btn" onClick={startSync} disabled={busy}>
-            {busy ? <Loader2 className="spin" size={15} /> : <RefreshCw size={15} />}
-            Sync from sheets
-          </button>
+          <div className="rsa-title-actions">
+            <button type="button" className="rsa-link-btn" onClick={toggleLinks} disabled={busy}>
+              <Link2 size={15} />
+              Sheet links
+            </button>
+            <button type="button" className="rsa-sync-btn" onClick={startSync} disabled={busy}>
+              {busy ? <Loader2 className="spin" size={15} /> : <RefreshCw size={15} />}
+              Sync from sheets
+            </button>
+          </div>
         ) : null}
       </div>
       <p className="rsa-hint">
         Pull the response and shortlist sheets straight from Google with <strong>Sync from sheets</strong>,
         or switch to a tab and paste. Either way you preview before anything is saved.
       </p>
+
+      {showLinks && !inSync ? (
+        <div className="rsa-links-editor">
+          <p className="rsa-hint" style={{ marginTop: 0 }}>
+            Fix a missing or wrong sheet URL here — no need to re-import the master sheet.
+            Saving marks the link as changed; then <strong>Sync from sheets</strong> pulls it.
+          </p>
+          <label className="rsa-link-field">
+            <span>Response sheet URL</span>
+            <input
+              type="url"
+              value={respUrl}
+              onChange={(e) => setRespUrl(e.target.value)}
+              placeholder="https://docs.google.com/spreadsheets/…"
+              disabled={linkBusy}
+            />
+          </label>
+          <label className="rsa-link-field">
+            <span>Shortlist sheet URL</span>
+            <input
+              type="url"
+              value={shortUrl}
+              onChange={(e) => setShortUrl(e.target.value)}
+              placeholder="https://docs.google.com/spreadsheets/…"
+              disabled={linkBusy}
+            />
+          </label>
+          {linkMsg ? <div className="rsa-link-msg">{linkMsg}</div> : null}
+          <div className="rsa-link-actions">
+            <button type="button" className="back-button" onClick={toggleLinks} disabled={linkBusy}>
+              Close
+            </button>
+            <button type="button" className="primary-button" onClick={saveLinks} disabled={linkBusy}>
+              {linkBusy ? <Loader2 className="spin" size={15} /> : <Link2 size={15} />}
+              Save links
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {[
         {

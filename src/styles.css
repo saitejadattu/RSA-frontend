@@ -2220,6 +2220,86 @@ input:focus {
   cursor: default;
 }
 
+.rsa-title-actions {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rsa-link-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #d7dce5;
+  background: #f4f6fa;
+  color: #334155;
+  border-radius: 999px;
+  padding: 7px 14px;
+  font-size: 12.5px;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.rsa-link-btn:hover:not(:disabled) {
+  background: #e8edf5;
+}
+
+.rsa-link-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.rsa-links-editor {
+  border: 1px solid #e2e8f0;
+  background: #f9fafb;
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.rsa-link-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.rsa-link-field span {
+  font-size: 12px;
+  font-weight: 700;
+  color: #475569;
+}
+
+.rsa-link-field input {
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 13px;
+  width: 100%;
+}
+
+.rsa-link-field input:focus {
+  outline: none;
+  border-color: #0f766e;
+  box-shadow: 0 0 0 2px rgba(15, 118, 110, 0.15);
+}
+
+.rsa-link-msg {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #0f766e;
+}
+
+.rsa-link-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .rsa-sync-steps {
   display: flex;
   align-items: center;
