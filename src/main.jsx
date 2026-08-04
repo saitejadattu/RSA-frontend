@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   AlertCircle,
@@ -118,8 +118,68 @@ async function apiRequest(path, { method = "GET", body, token, adminToken } = {}
   return data;
 }
 
+// Remember scroll positions per route — both the window AND any inner scroll
+// container tagged with data-scroll-key (long tables/lists) — so navigating back
+// returns you exactly where you were, not to the top / first row.
+// - a single capture-phase listener catches window + container scrolls and saves
+//   under the *live* route key, so a route change can't record under the wrong key;
+// - a "settling" flag ignores scrolls during a transition, so the browser snapping
+//   a shorter page to top can't clobber the saved position;
+// - the restore re-applies (window + each container) until reached, surviving
+//   async content that loads in after render.
+function useScrollRestoration(routeKey) {
+  const positions = useRef({});
+  const liveKey = useRef(routeKey);
+  const settling = useRef(false);
+
+  useEffect(() => {
+    if ("scrollRestoration" in window.history) window.history.scrollRestoration = "manual";
+    const onScroll = (event) => {
+      if (settling.current) return;
+      const t = event.target;
+      const key = liveKey.current;
+      if (t === document || t === document.documentElement || t === document.body) {
+        positions.current[`${key}::win`] = window.scrollY;
+      } else if (t && t.nodeType === 1 && t.hasAttribute && t.hasAttribute("data-scroll-key")) {
+        positions.current[`${key}::${t.getAttribute("data-scroll-key")}`] = t.scrollTop;
+      }
+    };
+    // capture phase so it catches scroll from any inner container (scroll doesn't bubble)
+    window.addEventListener("scroll", onScroll, true);
+    return () => window.removeEventListener("scroll", onScroll, true);
+  }, []);
+
+  useLayoutEffect(() => {
+    liveKey.current = routeKey;
+    settling.current = true;
+    let cancelled = false;
+    let tries = 0;
+    const finish = () => { settling.current = false; };
+    const restore = () => {
+      if (cancelled) return;
+      let reached = true;
+      const winTarget = positions.current[`${routeKey}::win`] || 0;
+      window.scrollTo(0, winTarget);
+      if (winTarget > 0 && Math.abs(window.scrollY - winTarget) > 2) reached = false;
+      document.querySelectorAll("[data-scroll-key]").forEach((el) => {
+        const saved = positions.current[`${routeKey}::${el.getAttribute("data-scroll-key")}`];
+        if (saved != null && saved > 0) {
+          el.scrollTop = saved;
+          if (Math.abs(el.scrollTop - saved) > 2) reached = false;
+        }
+      });
+      tries += 1;
+      if (!reached && tries < 90) requestAnimationFrame(restore);
+      else finish();
+    };
+    requestAnimationFrame(restore);
+    return () => { cancelled = true; finish(); };
+  }, [routeKey]);
+}
+
 function App() {
   const [route, navigate] = useHashRoute();
+  useScrollRestoration(route.join("/"));
   const [token, setToken] = useState(() => localStorage.getItem(ACCESS_TOKEN_KEY));
   const [adminToken, setAdminToken] = useState(() => localStorage.getItem(ADMIN_TOKEN_KEY));
   // The URL decides the mode when it says so, otherwise fall back to whichever
@@ -1642,13 +1702,40 @@ function AdminComingSoon({ title, eyebrow = "Admin Dashboard", subtitle, note, o
   );
 }
 
+function ReportRow({ report, open, onToggle, onPublish, busy }) {
+  return (
+    <div className={`rep-item ${open ? "open" : ""}`}>
+      <div className="rep-row" onClick={onToggle}>
+        <span className="rep-caret">{open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</span>
+        <span className="rep-main">
+          <strong>{report.student?.name || "Student"}</strong>
+          <span className="rep-sub">{report.company || "Company"} · {report.role || "—"}{report.overall?.score != null ? ` · ${report.overall.score}/10` : ""}</span>
+        </span>
+        <span className={`vis-badge ${report.visible_to_student ? "on" : ""}`}>{report.visible_to_student ? "Shared" : "Pending"}</span>
+        <span className="rep-date">{formatDate(report.generated_at)}</span>
+        <button
+          type="button"
+          className={`rep-pub ${report.visible_to_student ? "unpub" : "pub"}`}
+          disabled={busy}
+          onClick={(e) => { e.stopPropagation(); onPublish(); }}
+        >
+          {busy ? "…" : report.visible_to_student ? "Unpublish" : "Publish"}
+        </button>
+      </div>
+      {open ? <div className="rep-body"><AdminInterviewReportCard report={report} /></div> : null}
+    </div>
+  );
+}
+
 function AdminReportsView({ adminToken, reportsSummary = {} }) {
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [filter, setFilter] = useState("all");
   const [openId, setOpenId] = useState(null);
+  const [openCompany, setOpenCompany] = useState(null);
   const [busyId, setBusyId] = useState(null);
+  const [pending, setPending] = useState([]);
+  const [gen, setGen] = useState(null); // {done,total,current} while generating
 
   function load() {
     setLoading(true);
@@ -1658,10 +1745,14 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }
-  useEffect(load, [adminToken]);
+  function loadPending() {
+    apiRequest("/admin/sessions/pending", { adminToken })
+      .then((d) => setPending(Array.isArray(d) ? d : []))
+      .catch(() => {});
+  }
+  useEffect(() => { load(); loadPending(); }, [adminToken]);
 
-  async function toggle(report, event) {
-    event.stopPropagation();
+  async function togglePublish(report) {
     setBusyId(report.id);
     try {
       await apiRequest(`/admin/reports/${report.id}/visibility`, {
@@ -1677,9 +1768,40 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
     }
   }
 
-  const filtered = reports.filter((r) =>
-    filter === "all" ? true : filter === "published" ? r.visible_to_student : !r.visible_to_student
-  );
+  // Analyse each pending session one at a time (avoids server timeout + bursting
+  // the AI quota). Stops on the first failure with a clear message.
+  async function generatePending() {
+    if (!pending.length || gen) return;
+    setError("");
+    const list = [...pending];
+    for (let i = 0; i < list.length; i++) {
+      setGen({ done: i, total: list.length, current: list[i].company });
+      try {
+        await apiRequest(`/interview-sessions/${list[i].id}/analyze`, { method: "POST", adminToken });
+      } catch (e) {
+        setError(`Stopped at ${list[i].company}: ${e.message}`);
+        break;
+      }
+    }
+    setGen(null);
+    load();
+    loadPending();
+  }
+
+  // Reports grouped by company (the only view — a company holds its students).
+  const companies = useMemo(() => {
+    const map = {};
+    reports.forEach((r) => {
+      const key = r.company || "Company";
+      if (!map[key]) map[key] = { company: key, expectations: null, focus: [], reports: [] };
+      map[key].reports.push(r);
+      if (!map[key].expectations && r.company_expectations?.expectations) {
+        map[key].expectations = r.company_expectations.expectations;
+        map[key].focus = r.company_expectations.focus || [];
+      }
+    });
+    return Object.values(map).sort((a, b) => b.reports.length - a.reports.length);
+  }, [reports]);
 
   return (
     <>
@@ -1691,47 +1813,61 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
             {reportsSummary.published ?? 0} of {reportsSummary.reports ?? reports.length} published · {reportsSummary.pending ?? 0} pending
           </p>
         </div>
-        <button className="icon-button" type="button" onClick={load} disabled={loading} title="Refresh">
-          <RefreshCw className={loading ? "spin" : ""} size={18} />
-        </button>
+        <div className="rep-head-actions">
+          {pending.length ? (
+            <button type="button" className="rep-generate" onClick={generatePending} disabled={!!gen}>
+              <Sparkles size={16} />
+              {gen ? `Generating ${gen.done + 1}/${gen.total}…` : `Generate reports (${pending.length})`}
+            </button>
+          ) : null}
+          <button className="icon-button" type="button" onClick={() => { load(); loadPending(); }} disabled={loading || !!gen} title="Refresh">
+            <RefreshCw className={loading ? "spin" : ""} size={18} />
+          </button>
+        </div>
       </header>
 
+      {gen ? <p className="range-note">Analysing {gen.current} — {gen.done + 1} of {gen.total}. Keep this tab open; this can take a while.</p> : null}
       {error ? <StatusMessage error={error} /> : null}
-
-      <div className="rep-tabs">
-        {[["all", "All"], ["pending", "Pending"], ["published", "Published"]].map(([k, l]) => (
-          <button key={k} type="button" className={`rep-tab ${filter === k ? "on" : ""}`} onClick={() => setFilter(k)}>{l}</button>
-        ))}
-      </div>
 
       {loading ? (
         <PanelLoader />
-      ) : !filtered.length ? (
-        <div className="empty-state compact"><p>No interview reports{filter !== "all" ? ` (${filter})` : ""} yet.</p></div>
+      ) : !companies.length ? (
+        <div className="empty-state compact"><p>No interview reports yet.</p></div>
       ) : (
-        <div className="rep-list">
-          {filtered.map((r) => (
-            <div className={`rep-item ${openId === r.id ? "open" : ""}`} key={r.id}>
-              <div className="rep-row" onClick={() => setOpenId(openId === r.id ? null : r.id)}>
-                <span className="rep-caret">{openId === r.id ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</span>
+        <div className="rep-list" data-scroll-key="reports">
+          {companies.map((c) => (
+            <div className={`rep-item ${openCompany === c.company ? "open" : ""}`} key={c.company}>
+              <div className="rep-row" onClick={() => setOpenCompany(openCompany === c.company ? null : c.company)}>
+                <span className="rep-caret">{openCompany === c.company ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</span>
                 <span className="rep-main">
-                  <strong>{r.student?.name || "Student"}</strong>
-                  <span className="rep-sub">{r.company || "Company"} · {r.role || "—"}</span>
+                  <strong>{c.company}</strong>
+                  <span className="rep-sub">{c.reports.length} candidate{c.reports.length === 1 ? "" : "s"}{c.expectations ? " · RSA ready" : ""}</span>
                 </span>
-                <span className={`vis-badge ${r.visible_to_student ? "on" : ""}`}>{r.visible_to_student ? "Shared" : "Pending"}</span>
-                <span className="rep-date">{formatDate(r.generated_at)}</span>
-                <button
-                  type="button"
-                  className={`rep-pub ${r.visible_to_student ? "unpub" : "pub"}`}
-                  disabled={busyId === r.id}
-                  onClick={(e) => toggle(r, e)}
-                >
-                  {busyId === r.id ? "…" : r.visible_to_student ? "Unpublish" : "Publish"}
-                </button>
+                <span className="rep-date">{c.reports.length}</span>
               </div>
-              {openId === r.id ? (
+              {openCompany === c.company ? (
                 <div className="rep-body">
-                  <AdminInterviewReportCard report={r} />
+                  {c.expectations ? (
+                    <div className="report-sec report-expects">
+                      <strong>What this company looked for</strong>
+                      <p>{c.expectations}</p>
+                      {c.focus.length ? <div className="report-focus">{c.focus.map((f, i) => <span key={i} className="report-focus-chip">{f}</span>)}</div> : null}
+                    </div>
+                  ) : (
+                    <p className="ov-muted" style={{ marginTop: 0 }}>Company summary not generated yet — run “Generate reports”.</p>
+                  )}
+                  <div className="rsa-candidates">
+                    {c.reports.map((r) => (
+                      <ReportRow
+                        key={r.id}
+                        report={r}
+                        open={openId === r.id}
+                        onToggle={() => setOpenId(openId === r.id ? null : r.id)}
+                        onPublish={() => togglePublish(r)}
+                        busy={busyId === r.id}
+                      />
+                    ))}
+                  </div>
                 </div>
               ) : null}
             </div>
@@ -1774,7 +1910,7 @@ function AdminOverview({
 
       <AddCompaniesPanel adminToken={adminToken} onImported={onRefresh} />
 
-      <section className="ov-card">
+      {/* <section className="ov-card">
         <div className="ov-card-head">
           <div>
             <h2>Where the {fmt(applied)} applications stand</h2>
@@ -1803,7 +1939,7 @@ function AdminOverview({
           })}
         </div>
         <p className="ov-foot">Interested is derived from the opt-in rate on dated applications; Selected / joined covers offer-accepted, selected and joined since they aren't stored separately.</p>
-      </section>
+      </section> */}
 
       <div className="ov-grid2">
         <section className="ov-card">
@@ -1873,7 +2009,7 @@ function AdminOverview({
             {loading ? (
               <PanelLoader />
             ) : recentOpportunities.length ? (
-              <div className="ov-table-scroll">
+              <div className="ov-table-scroll" data-scroll-key="ov-openings">
                 <div className="ov-table">
                   <div className="ov-thead"><span>Company</span><span>Role</span><span>Applied</span><span>Shortlisted</span><span>Received</span></div>
                   {recentOpportunities.map((o) => (
@@ -2113,23 +2249,37 @@ function TrendChart({ points }) {
   );
 }
 
+// Last resolved analytics view (range + data), kept across mounts so returning
+// to Analytics (after opening a student) shows instantly instead of re-fetching.
+let analyticsSnapshot = null;
+
 function AdminAnalyticsView({ adminToken, navigate = () => {} }) {
-  const [preset, setPreset] = useState("this_month");
-  const [range, setRange] = useState(() => presetRange("this_month"));
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
+  // Restored on re-mount (e.g. after opening a student and hitting Back) so the
+  // page shows instantly instead of re-fetching with a loading flash.
+  const snap = analyticsSnapshot;
+  const [preset, setPreset] = useState(() => snap?.preset ?? "this_month");
+  const [range, setRange] = useState(() => snap?.range ?? presetRange("this_month"));
+  const [data, setData] = useState(() => snap?.data ?? null);
+  const [loading, setLoading] = useState(() => !snap?.data);
   const [error, setError] = useState("");
   const [openStudent, setOpenStudent] = useState(null);
   const [openCategory, setOpenCategory] = useState(null);
   const [studentSearch, setStudentSearch] = useState("");
   const [studentSort, setStudentSort] = useState({ key: "apps", dir: "desc" });
   // When "This month" has no data yet, we jump to the latest month that does.
-  const [fallbackNote, setFallbackNote] = useState("");
-  const didFallback = useRef(false);
+  const [fallbackNote, setFallbackNote] = useState(() => snap?.fallbackNote ?? "");
+  const didFallback = useRef(!!snap); // already resolved if restored from snapshot
+
+  // Keep the module snapshot in sync so the next mount can restore it.
+  useEffect(() => {
+    if (data) analyticsSnapshot = { preset, range, data, fallbackNote };
+  }, [preset, range, data, fallbackNote]);
 
   useEffect(() => {
     let live = true;
-    setLoading(true);
+    // Only show the skeleton on a true cold load; a re-mount with cached data
+    // refreshes silently in the background.
+    setData((d) => { if (!d) setLoading(true); return d; });
     setError("");
     setOpenStudent(null);
     setOpenCategory(null);
@@ -2222,13 +2372,13 @@ function AdminAnalyticsView({ adminToken, navigate = () => {} }) {
             <KpiTile label="New openings" value={fmt(kpis.new_opportunities)} sub="received in range" />
           </section>
 
-          <section className="panel wide">
+          {/* <section className="panel wide">
             <div className="panel-title">
               <TrendingUp size={18} />
               <h2>Applications over time</h2>
             </div>
             <TrendChart points={data.daily} />
-          </section>
+          </section> */}
 
           <section className="analytics-2col">
             <div className="panel">
@@ -2331,7 +2481,7 @@ function AdminAnalyticsView({ adminToken, navigate = () => {} }) {
                   </span>
                   <span className="student-filter-count">{activeStudents.length} shown</span>
                 </div>
-                <div className="admin-table analytics-table scrollable">
+                <div className="admin-table analytics-table scrollable" data-scroll-key="active-students">
                   <div className="admin-head">
                     <span>Student</span>
                     <button
@@ -2435,6 +2585,8 @@ function ProfileField({ label, value }) {
 function AdminInterviewReportCard({ report }) {
   const overall = report.overall || {};
   const comm = report.communication || {};
+  const expectations = report.company_expectations || {};
+  const answers = Array.isArray(report.answers) ? report.answers : [];
   const asList = (v) => (Array.isArray(v) ? v : v ? [v] : []);
   // Improvements arrive as { area, detail, priority }; strengths as plain
   // strings. Render both readably instead of dumping raw JSON.
@@ -2444,22 +2596,41 @@ function AdminInterviewReportCard({ report }) {
     if (x.area || x.detail) return [x.area, x.detail].filter(Boolean).join(" — ");
     return x.point || x.note || x.text || "";
   };
+  // answers[].accuracy is 0-100; the RSA shows a rating out of 5.
+  const rating5 = (accuracy) => (accuracy == null ? null : Math.round((accuracy / 20) * 10) / 10);
+
   return (
     <div className="report-card">
-      <div className="report-head">
-        <div className="report-title">
-          <strong>{report.company || "Company"}</strong>
-          <span>{report.role || ""}</span>
-        </div>
-        <div className="report-scores">
-          {overall.score != null ? <span className="score-pill">{overall.score}/10</span> : null}
-          {overall.verdict ? <span className="verdict">{overall.verdict}</span> : null}
-          <span className={`vis-badge ${report.visible_to_student ? "on" : ""}`}>
-            {report.visible_to_student ? "Shared with student" : "Not shared"}
-          </span>
-        </div>
-      </div>
       {overall.summary ? <p className="report-summary">{overall.summary}</p> : null}
+
+      {report.interviewer_satisfaction ? (
+        <div className="report-sec">
+          <strong>How they met the bar</strong>
+          <p>{report.interviewer_satisfaction}</p>
+        </div>
+      ) : null}
+
+      {answers.length ? (
+        <div className="report-sec">
+          <strong>Questions &amp; answers</strong>
+          <div className="rsa-qa">
+            {answers.map((a, i) => {
+              const r = rating5(a.accuracy);
+              return (
+                <div className="rsa-q" key={i}>
+                  <div className="rsa-q-head">
+                    <span className="rsa-q-text">Q{i + 1}. {a.question_text}</span>
+                    {r != null ? <span className="rsa-rating">{r}/5</span> : null}
+                  </div>
+                  {a.student_answer ? <p className="rsa-line"><span>Candidate</span>{a.student_answer}</p> : null}
+                  {a.ideal_answer ? <p className="rsa-line rsa-ideal"><span>Expected</span>{a.ideal_answer}</p> : null}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+
       {asList(report.strengths).length ? (
         <div className="report-sec">
           <strong>Strengths</strong>
@@ -2472,6 +2643,14 @@ function AdminInterviewReportCard({ report }) {
           <ul>{asList(report.improvements).map((x, i) => <li key={i}>{text(x)}</li>)}</ul>
         </div>
       ) : null}
+
+      {report.coaching_note ? (
+        <div className="report-sec report-coaching">
+          <strong>Coaching for next time</strong>
+          <p>{report.coaching_note}</p>
+        </div>
+      ) : null}
+
       {comm.notes ? (
         <div className="report-sec">
           <strong>Communication</strong>
@@ -2587,7 +2766,7 @@ function StudentProfileView({ adminToken, studentId, navigate, onBack }) {
               </div>
             </div>
             {filtered.length ? (
-              <div className="admin-table applicants-table scrollable">
+              <div className="admin-table applicants-table scrollable" data-scroll-key="applicants">
                 <div className="admin-head">
                   <span>Company</span>
                   <span>Status</span>
@@ -4353,7 +4532,7 @@ function OpportunityDetail({ detail, adminToken, opportunityId, onRefresh }) {
 
           {applicantsOpen ? (
             filteredApplicants.length ? (
-              <div className="admin-table applicants-table scrollable">
+              <div className="admin-table applicants-table scrollable" data-scroll-key="applicants">
                 <div className="admin-head">
                   <span>Student</span>
                   <span>Status</span>
@@ -4531,7 +4710,7 @@ function AdminStudentsView({ students, loading, navigate = () => {} }) {
       )}
 
       {sortedStudents.length ? (
-        <div className="admin-table students-table scrollable">
+        <div className="admin-table students-table scrollable" data-scroll-key="students">
           <div className="admin-head">
             <span>Student</span>
             <span>Applied</span>

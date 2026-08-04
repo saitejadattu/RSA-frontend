@@ -3209,6 +3209,40 @@ input:focus {
 }
 .rep-tab.on { border-color: #0f766e; color: #0f766e; background: #effefb; }
 
+.rep-head-actions { display: flex; align-items: center; gap: 10px; }
+.rep-generate {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #bfe5d1;
+  background: #e8f6ef;
+  color: #0f766e;
+  border-radius: 8px;
+  padding: 9px 16px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.rep-generate:hover { background: #d7efe4; }
+.rep-generate:disabled { opacity: 0.65; cursor: default; }
+
+.rep-subtabs { display: flex; gap: 6px; margin-bottom: 14px; }
+.rep-chip {
+  border: 1px solid #e6ebea;
+  background: #fff;
+  border-radius: 999px;
+  padding: 5px 13px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #667085;
+  cursor: pointer;
+}
+.rep-chip.on { border-color: #0f766e; color: #0f766e; background: #effefb; }
+
+/* candidates nested inside a company group */
+.rsa-candidates { display: grid; gap: 8px; margin-top: 12px; }
+
 .rep-list { display: grid; gap: 10px; max-height: 68vh; overflow-y: auto; padding-right: 4px; }
 .rep-item {
   background: #fff;
@@ -3532,6 +3566,83 @@ input:focus {
   font-size: 13px;
   color: #334155;
   line-height: 1.5;
+}
+
+/* RSA extras: company expectations, per-question Q&A, coaching */
+.report-expects {
+  background: #f0f9f7;
+  border: 1px solid #cdeee8;
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+.report-focus {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.report-focus-chip {
+  font-size: 12px;
+  font-weight: 600;
+  color: #0f766e;
+  background: #e8f4f2;
+  border-radius: 999px;
+  padding: 3px 10px;
+}
+.report-coaching {
+  background: #fffaf0;
+  border: 1px solid #f3e2c0;
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+.rsa-qa {
+  margin-top: 8px;
+  display: grid;
+  gap: 10px;
+}
+.rsa-q {
+  border: 1px solid #eef1f1;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.rsa-q-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+.rsa-q-text {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #101828;
+  line-height: 1.4;
+}
+.rsa-rating {
+  flex: none;
+  font-size: 12px;
+  font-weight: 800;
+  color: #0f766e;
+  background: #e8f4f2;
+  border-radius: 6px;
+  padding: 2px 8px;
+}
+.rsa-line {
+  margin: 6px 0 0 !important;
+  font-size: 13px;
+  color: #334155;
+  line-height: 1.5;
+}
+.rsa-line > span {
+  display: inline-block;
+  min-width: 74px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #98a2b3;
+}
+.rsa-ideal {
+  color: #475467;
 }
 
 @media (max-width: 900px) {
