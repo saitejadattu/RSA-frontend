@@ -1987,7 +1987,7 @@ function AdminOverview({
         </button>
         {openingsOpen ? (
           <>
-            {recentOpportunities.length ? (
+            {recentOpportunities.length || searchTerm ? (
               <div className="opportunities-controls">
                 <div className="search-field">
                   <input type="text" placeholder="Search by company name…" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="search-input" />
@@ -3393,7 +3393,7 @@ function QuestionsPanel({ questions }) {
           </select>
         </div>
       </div>
-      <div className="rsa-questions">
+      <div className="rsa-questions scrollable" data-scroll-key="opp-questions">
         {visible.map((question) => (
           <div className="rsa-question" key={question.id}>
             <span className={`rsa-cat ${question.is_technical ? "tech" : ""}`}>{question.category}</span>
@@ -4434,7 +4434,7 @@ function InterviewReportsPanel({ adminToken, opportunityId }) {
 
           {!busy && tab === "reports" ? (
             reports.length ? (
-              <div className="rsa-reports">
+              <div className="rsa-reports scrollable" data-scroll-key="opp-reports">
                 {reports.map((report) => (
                   <ReportCard
                     key={report.id}
