@@ -1424,6 +1424,14 @@ input:focus {
 }
 
 .rsa-session {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.rsa-session-open {
+  flex: 1 1 auto;
+  min-width: 0;
   display: grid;
   grid-template-columns: 1fr auto auto;
   gap: 12px;
@@ -1437,20 +1445,42 @@ input:focus {
   color: inherit;
 }
 
-.rsa-session:hover {
+.rsa-session-open:hover {
   border-color: #bfe5d1;
   box-shadow: 0 3px 12px rgba(15, 23, 42, 0.08);
 }
 
-.rsa-session div {
+.rsa-session-open div {
   display: grid;
   gap: 3px;
   min-width: 0;
 }
 
-.rsa-session span {
+.rsa-session-open span {
   font-size: 12.5px;
   color: #65717e;
+}
+
+.rsa-session-del {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  border: 1px solid #f0d4d4;
+  background: #fdf2f2;
+  color: #b42318;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.rsa-session-del:hover:not(:disabled) {
+  background: #fbe3e3;
+}
+
+.rsa-session-del:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 /* tabs */
@@ -2913,6 +2943,107 @@ input:focus {
   white-space: nowrap;
 }
 
+.sd-download {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #bfe5d1;
+  background: #e8f6ef;
+  color: #0f766e;
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 12.5px;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.sd-download:hover:not(:disabled) {
+  background: #d7efe4;
+}
+
+.sd-download:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.sd-export {
+  position: relative;
+  flex: none;
+}
+
+.sd-export-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  width: 230px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.14);
+  padding: 10px;
+}
+
+.sd-export-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: 800;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-bottom: 10px;
+}
+
+.sd-export-head .link-button { font-size: 11.5px; }
+
+.sd-export-fields {
+  display: grid;
+  gap: 0px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.sd-export-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  line-height: 1.25;
+  color: #334155;
+  padding: 6px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.sd-export-field:hover {
+  background: #f4f6fa;
+}
+
+.sd-export-field input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: #0f766e;
+  cursor: pointer;
+}
+
+.sd-export-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #eef2f6;
+}
+
+.sd-export-actions .back-button,
+.sd-export-actions .primary-button { padding: 6px 12px; font-size: 12.5px; }
+
 .admin-head .sort-th {
   font: inherit;
   color: inherit;
@@ -3317,6 +3448,52 @@ input:focus {
 }
 .rep-generate:hover { background: #d7efe4; }
 .rep-generate:disabled { opacity: 0.65; cursor: default; }
+.rep-generate.small { padding: 6px 12px; font-size: 12px; }
+
+/* Pending (half-finished) extractions, resumable one at a time. */
+.rep-pending-box {
+  border: 1px solid #f0e2c0;
+  background: #fffbf0;
+  border-radius: 10px;
+  margin-bottom: 14px;
+  overflow: hidden;
+}
+.rep-pending-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 12px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #92651a;
+  cursor: pointer;
+  text-align: left;
+}
+.rep-pending-list {
+  display: grid;
+  gap: 8px;
+  padding: 0 14px 14px;
+}
+.rep-pending-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: #fff;
+  border: 1px solid #efe6d0;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.rep-pending-main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.rep-pending-main strong { font-size: 13.5px; }
+.rep-pending-main span { font-size: 12px; color: #8a7a5a; }
 
 .rep-subtabs { display: flex; gap: 6px; margin-bottom: 14px; }
 .rep-chip {

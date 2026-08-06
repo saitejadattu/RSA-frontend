@@ -31,6 +31,7 @@ import {
   ChevronDown,
   ChevronRight,
   ChevronUp,
+  Download,
   CircleHelp,
   Lightbulb,
   ListChecks,
@@ -38,6 +39,7 @@ import {
   Mic,
   Send,
   Sparkles,
+  Trash2,
   TriangleAlert,
   Upload,
   Wand2,
@@ -1737,6 +1739,9 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
   const [busyId, setBusyId] = useState(null);
   const [pending, setPending] = useState([]);
   const [gen, setGen] = useState(null); // {done,total,current} while generating
+  const [genOne, setGenOne] = useState(null); // session id being (re)generated on its own
+  const [filter, setFilter] = useState("all"); // all | pending | published (report publish state)
+  const [showPending, setShowPending] = useState(false); // reveal the pending-extractions list
 
   function load() {
     setLoading(true);
@@ -1789,10 +1794,33 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
     loadPending();
   }
 
-  // Reports grouped by company (the only view — a company holds its students).
+  // Resume / regenerate ONE half-finished extraction (analyse is idempotent —
+  // it overwrites that session's reports & questions, completing what's missing).
+  async function generateOne(session) {
+    if (gen || genOne) return;
+    setGenOne(session.id);
+    setError("");
+    try {
+      await apiRequest(`/interview-sessions/${session.id}/analyze`, { method: "POST", adminToken });
+    } catch (e) {
+      setError(`Failed for ${session.company}: ${e.message}`);
+    } finally {
+      setGenOne(null);
+      load();
+      loadPending();
+    }
+  }
+
+  const pendingReports = reports.filter((r) => !r.visible_to_student).length;
+
+  // Reports grouped by company, filtered by publish state (All / Pending / Published).
   const companies = useMemo(() => {
+    const src =
+      filter === "pending" ? reports.filter((r) => !r.visible_to_student)
+      : filter === "published" ? reports.filter((r) => r.visible_to_student)
+      : reports;
     const map = {};
-    reports.forEach((r) => {
+    src.forEach((r) => {
       const key = r.company || "Company";
       if (!map[key]) map[key] = { company: key, expectations: null, focus: [], reports: [] };
       map[key].reports.push(r);
@@ -1802,7 +1830,7 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
       }
     });
     return Object.values(map).sort((a, b) => b.reports.length - a.reports.length);
-  }, [reports]);
+  }, [reports, filter]);
 
   return (
     <>
@@ -1811,7 +1839,10 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
           <p className="eyebrow">Admin Dashboard</p>
           <h1>Interview reports</h1>
           <p className="ov-sub">
-            {reportsSummary.published ?? 0} of {reportsSummary.reports ?? reports.length} published · {reportsSummary.pending ?? 0} pending
+            {reportsSummary.published ?? 0} of {reportsSummary.reports ?? reports.length} published ·{" "}
+            <button type="button" className="link-button" onClick={() => setFilter("pending")}>
+              {reportsSummary.pending ?? pendingReports} pending
+            </button>
           </p>
         </div>
         <div className="rep-head-actions">
@@ -1830,10 +1861,55 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
       {gen ? <p className="range-note">Analysing {gen.current} — {gen.done + 1} of {gen.total}. Keep this tab open; this can take a while.</p> : null}
       {error ? <StatusMessage error={error} /> : null}
 
+      {/* Half-finished / not-yet-run transcript extractions: resume each on its own. */}
+      {pending.length ? (
+        <div className="rep-pending-box">
+          <button type="button" className="rep-pending-head" onClick={() => setShowPending((v) => !v)}>
+            {showPending ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+            {pending.length} transcript{pending.length === 1 ? "" : "s"} awaiting extraction — resume or regenerate individually
+          </button>
+          {showPending ? (
+            <div className="rep-pending-list">
+              {pending.map((s) => (
+                <div className="rep-pending-item" key={s.id}>
+                  <div className="rep-pending-main">
+                    <strong>{s.company}</strong>
+                    <span>{[s.role, `${s.students} candidate${s.students === 1 ? "" : "s"}`].filter(Boolean).join(" · ")}</span>
+                  </div>
+                  <button type="button" className="rep-generate small" onClick={() => generateOne(s)} disabled={!!gen || !!genOne}>
+                    {genOne === s.id ? <><Loader2 className="spin" size={14} /> Generating…</> : <><Sparkles size={14} /> Generate</>}
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {!loading && reports.length ? (
+        <div className="rep-subtabs">
+          <button type="button" className={`rep-chip ${filter === "all" ? "on" : ""}`} onClick={() => setFilter("all")}>
+            All ({reports.length})
+          </button>
+          <button type="button" className={`rep-chip ${filter === "pending" ? "on" : ""}`} onClick={() => setFilter("pending")}>
+            Pending ({pendingReports})
+          </button>
+          <button type="button" className={`rep-chip ${filter === "published" ? "on" : ""}`} onClick={() => setFilter("published")}>
+            Published ({reports.length - pendingReports})
+          </button>
+        </div>
+      ) : null}
+
       {loading ? (
         <PanelLoader />
       ) : !companies.length ? (
-        <div className="empty-state compact"><p>No interview reports yet.</p></div>
+        <div className="empty-state compact">
+          <p>
+            {filter === "pending" ? "No pending reports — everything is published."
+              : filter === "published" ? "No published reports yet."
+              : "No interview reports yet."}
+          </p>
+        </div>
       ) : (
         <div className="rep-list" data-scroll-key="reports">
           {companies.map((c) => (
@@ -2123,6 +2199,38 @@ function monthLabel(ym) {
   return `${mo} ${y}`;
 }
 
+// Columns the active-students export can include — one row per UNIQUE student
+// (the counts already summarise their applications, so no per-company rows).
+const ACTIVE_STUDENT_FIELDS = [
+  { key: "external_user_id", label: "Student ID (response sheet)", val: (s) => s.external_user_id || "" },
+  { key: "name", label: "Student name", val: (s) => s.name || "" },
+  { key: "phone", label: "Mobile number", val: (s) => s.phone || "" },
+  { key: "email", label: "Email", val: (s) => s.email || "" },
+  { key: "apps", label: "Total applied", val: (s) => s.apps ?? 0 },
+  { key: "shortlisted", label: "Total shortlisted", val: (s) => s.shortlisted ?? 0 },
+  { key: "not_shortlisted", label: "Total not shortlisted", val: (s) => s.not_shortlisted ?? 0 },
+];
+const DEFAULT_EXPORT_FIELDS = ["external_user_id", "name", "phone", "email", "apps", "shortlisted"];
+
+// Download rows as a CSV (opens natively in Google Sheets / Excel). A UTF-8 BOM
+// keeps names with accents/unicode readable; fields are quote-escaped.
+function downloadCsv(filename, headers, rows) {
+  const esc = (v) => {
+    const s = v == null ? "" : String(v);
+    return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const csv = [headers, ...rows].map((r) => r.map(esc).join(",")).join("\r\n");
+  const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 function DateRangeControl({ preset, range, onPreset, onCustom }) {
   const presets = [
     ["this_month", "This month"],
@@ -2267,6 +2375,8 @@ function AdminAnalyticsView({ adminToken, navigate = () => {} }) {
   const [openCategory, setOpenCategory] = useState(null);
   const [studentSearch, setStudentSearch] = useState("");
   const [studentSort, setStudentSort] = useState({ key: "apps", dir: "desc" });
+  const [showExport, setShowExport] = useState(false); // column-picker popover
+  const [exportFields, setExportFields] = useState(DEFAULT_EXPORT_FIELDS);
   // When "This month" has no data yet, we jump to the latest month that does.
   const [fallbackNote, setFallbackNote] = useState(() => snap?.fallbackNote ?? "");
   const didFallback = useRef(!!snap); // already resolved if restored from snapshot
@@ -2329,6 +2439,23 @@ function AdminAnalyticsView({ adminToken, navigate = () => {} }) {
     setStudentSort((prev) =>
       prev.key === key ? { key, dir: prev.dir === "desc" ? "asc" : "desc" } : { key, dir: key === "name" ? "asc" : "desc" }
     );
+  }
+
+  function toggleExportField(key) {
+    setExportFields((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
+  }
+
+  // Export the active-students list (respects the current search + sort) to CSV,
+  // which opens directly as a Google Sheet. One row per unique student, columns
+  // are whatever the admin ticked.
+  function exportActiveStudents() {
+    const fields = ACTIVE_STUDENT_FIELDS.filter((f) => exportFields.includes(f.key));
+    if (!fields.length || !activeStudents.length) return;
+    const headers = fields.map((f) => f.label);
+    const rows = activeStudents.map((s) => fields.map((f) => f.val(s)));
+    const span = range?.start && range?.end ? `${range.start}_to_${range.end}` : "all";
+    downloadCsv(`active-students_${span}.csv`, headers, rows);
+    setShowExport(false);
   }
 
   const kpis = data?.kpis || {};
@@ -2481,6 +2608,46 @@ function AdminAnalyticsView({ adminToken, navigate = () => {} }) {
                     />
                   </span>
                   <span className="student-filter-count">{activeStudents.length} shown</span>
+                  <div className="sd-export">
+                    <button
+                      type="button"
+                      className="sd-download"
+                      onClick={() => setShowExport((v) => !v)}
+                      disabled={!activeStudents.length}
+                      title="Download as CSV (opens in Google Sheets)"
+                    >
+                      <Download size={15} /> Download
+                      <ChevronDown size={14} />
+                    </button>
+                    {showExport ? (
+                      <div className="sd-export-menu">
+                        <div className="sd-export-head">
+                          <span>Columns to include</span>
+                          <button type="button" className="link-button" onClick={() => setExportFields(ACTIVE_STUDENT_FIELDS.map((f) => f.key))}>
+                            Select all
+                          </button>
+                        </div>
+                        <div className="sd-export-fields">
+                          {ACTIVE_STUDENT_FIELDS.map((f) => (
+                            <label key={f.key} className="sd-export-field">
+                              <input
+                                type="checkbox"
+                                checked={exportFields.includes(f.key)}
+                                onChange={() => toggleExportField(f.key)}
+                              />
+                              {f.label}
+                            </label>
+                          ))}
+                        </div>
+                        <div className="sd-export-actions">
+                          <button type="button" className="back-button" onClick={() => setShowExport(false)}>Cancel</button>
+                          <button type="button" className="primary-button" onClick={exportActiveStudents} disabled={!exportFields.length}>
+                            <Download size={14} /> Download CSV
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
                 <div className="admin-table analytics-table scrollable" data-scroll-key="active-students">
                   <div className="admin-head">
@@ -3034,6 +3201,8 @@ const rsaApi = {
     apiRequest(`/admin/questions?opportunity_id=${opportunityId}&technical_only=false`, { adminToken }),
   sessions: (adminToken, opportunityId) =>
     apiRequest(`/interview-sessions/?opportunity_id=${opportunityId}`, { adminToken }),
+  deleteSession: (adminToken, sessionId) =>
+    apiRequest(`/interview-sessions/${sessionId}`, { method: "DELETE", adminToken }),
 };
 
 const sheetApi = {
@@ -4267,6 +4436,7 @@ function InterviewReportsPanel({ adminToken, opportunityId }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [tab, setTab] = useState("reports");
+  const [reused, setReused] = useState(false);
 
   async function refreshSide() {
     try {
@@ -4320,6 +4490,7 @@ function InterviewReportsPanel({ adminToken, opportunityId }) {
         speaker_map: speakerMap,
         round_name: "Technical Round",
       });
+      setReused(Boolean(confirmed.reused));
       setSessionId(confirmed.session_id);
       const result = await rsaApi.analyze(adminToken, confirmed.session_id);
       setAnalysis(result);
@@ -4350,6 +4521,24 @@ function InterviewReportsPanel({ adminToken, opportunityId }) {
     }
   }
 
+  async function handleDeleteSession(session) {
+    const label = `${session.round_name || "Interview"} · ${session.students?.length || 0} candidates`;
+    if (!window.confirm(
+      `Delete this extraction (${label})?\n\nThis removes its transcript, extracted questions and reports. This cannot be undone.`
+    )) return;
+    setBusy(true);
+    setError("");
+    try {
+      await rsaApi.deleteSession(adminToken, session.id);
+      if (session.id === sessionId) reset();
+      await refreshSide();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function reset() {
     setStage("idle");
     setProposal(null);
@@ -4357,6 +4546,7 @@ function InterviewReportsPanel({ adminToken, opportunityId }) {
     setReports([]);
     setAnalysis(null);
     setError("");
+    setReused(false);
   }
 
   return (
@@ -4382,21 +4572,46 @@ function InterviewReportsPanel({ adminToken, opportunityId }) {
               <h3 className="detail-subhead">Previous interviews</h3>
               <div className="rsa-sessions">
                 {sessions.map((session) => (
-                  <button type="button" className="rsa-session" key={session.id} onClick={() => openSession(session.id)}>
-                    <div>
-                      <strong>{session.round_name || "Interview"}</strong>
-                      <span>{session.students?.length || 0} candidates · {formatDate(session.scheduled_at)}</span>
-                    </div>
-                    <span className={`status-pill ${session.ai_status === "completed" ? "good" : "neutral"}`}>
-                      {session.ai_status || "not started"}
-                    </span>
-                    <ArrowRight size={16} />
-                  </button>
+                  <div className="rsa-session" key={session.id}>
+                    <button type="button" className="rsa-session-open" onClick={() => openSession(session.id)}>
+                      <div>
+                        <strong>{session.round_name || "Interview"}</strong>
+                        <span>{session.students?.length || 0} candidates · {formatDate(session.scheduled_at)}</span>
+                      </div>
+                      <span className={`status-pill ${session.ai_status === "completed" ? "good" : "neutral"}`}>
+                        {session.ai_status || "not started"}
+                      </span>
+                      <ArrowRight size={16} />
+                    </button>
+                    <button
+                      type="button"
+                      className="rsa-session-del"
+                      title="Delete this extraction (transcript, questions, reports)"
+                      onClick={() => handleDeleteSession(session)}
+                      disabled={busy}
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
                 ))}
               </div>
             </>
           ) : null}
         </>
+      ) : null}
+
+      {stage === "review" && proposal?.existing_session ? (
+        <div className="rsa-warning" style={{ marginBottom: 12 }}>
+          <TriangleAlert size={16} />
+          <span>
+            This transcript was already extracted for this opening
+            {proposal.existing_session.ai_status ? ` (${proposal.existing_session.ai_status})` : ""}. Confirming
+            will <strong>overwrite that same session</strong>, not create a duplicate.{" "}
+            <button type="button" className="link-button" onClick={() => openSession(proposal.existing_session.session_id)}>
+              Open the existing report instead
+            </button>{" "}(no AI re-run).
+          </span>
+        </div>
       ) : null}
 
       {stage === "review" && proposal ? (
@@ -4415,6 +4630,7 @@ function InterviewReportsPanel({ adminToken, opportunityId }) {
             <div className="status success" style={{ marginBottom: 14 }}>
               <BadgeCheck size={18} />
               <span>
+                {reused ? "Re-ran the existing session (no duplicate created) — " : ""}
                 Analysed {analysis.candidates_analyzed} candidate(s), extracted {analysis.questions_extracted} questions
                 {analysis.model ? ` · ${analysis.model}` : ""}
               </span>
