@@ -1736,6 +1736,35 @@ function ReportRow({ report, open, onToggle, onPublish, busy }) {
   );
 }
 
+function StudentFeedbackRow({ report, open, onToggle, selected, onSelect, onDownload, downloading }) {
+  return (
+    <div className={`rep-item student-feedback-row ${open ? "open" : ""}`}>
+      <div className="rep-row">
+        <label className="student-report-check" onClick={(event) => event.stopPropagation()}>
+          <input type="checkbox" checked={selected} onChange={(event) => onSelect(event.target.checked)} aria-label={`Select ${report.student?.name || "student"}`} />
+        </label>
+        <span className="rep-main">
+          <strong>{report.student?.name || "Student"}</strong>
+          <span className="rep-sub">{report.company || "Company"} Â· {report.role || "â€”"}</span>
+          <span className="rep-sub student-feedback-meta">
+            {report.overall?.score != null ? `${report.overall.score}/10 Â· ` : ""}
+            {report.visible_to_student ? "Published" : "Pending"}
+          </span>
+        </span>
+        <span className={`vis-badge ${report.visible_to_student ? "on" : ""}`}>{report.visible_to_student ? "Shared" : "Pending"}</span>
+        <span className="rep-date">{formatDate(report.generated_at)}</span>
+        <button type="button" className="rep-view-feedback" onClick={onToggle}>
+          {open ? "Hide feedback" : "View feedback"}
+        </button>
+        <button type="button" className="rep-student-download" disabled={downloading} onClick={onDownload}>
+          {downloading ? <Loader2 className="spin" size={14} /> : <Download size={14} />} DOCX
+        </button>
+      </div>
+      {open ? <div className="rep-body"><AdminInterviewReportCard report={report} /></div> : null}
+    </div>
+  );
+}
+
 function AdminReportsView({ adminToken, reportsSummary = {} }) {
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1748,7 +1777,14 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
   const [genOne, setGenOne] = useState(null); // session id being (re)generated on its own
   const [filter, setFilter] = useState("all"); // all | pending | published (report publish state)
   const [monthFilter, setMonthFilter] = useState("all"); // all | YYYY-MM (report generation month)
+  const [feedbackView, setFeedbackView] = useState("company"); // company | student
+  const [studentSearch, setStudentSearch] = useState("");
+  const [studentCompanyFilter, setStudentCompanyFilter] = useState("all");
+  const [openStudentId, setOpenStudentId] = useState(null);
+  const [selectedStudentReports, setSelectedStudentReports] = useState([]);
+  const [studentExporting, setStudentExporting] = useState(null);
   const [showPending, setShowPending] = useState(false); // reveal the pending-extractions list
+  const [downloadingCompanyId, setDownloadingCompanyId] = useState(null);
 
   function load() {
     setLoading(true);
@@ -1778,6 +1814,68 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
       setError(err.message);
     } finally {
       setBusyId(null);
+    }
+  }
+
+  async function downloadCompanyFeedback(company) {
+    if (!company.companyId || downloadingCompanyId) return;
+    setDownloadingCompanyId(company.companyId);
+    setError("");
+    try {
+      const monthQuery = monthFilter === "all" ? "" : `?month=${encodeURIComponent(monthFilter)}`;
+      const response = await fetch(`${API_BASE_URL}/admin/reports/company/${company.companyId}/download${monthQuery}`, {
+        headers: { Authorization: `Bearer ${adminToken}` },
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        throw new Error(data?.detail || "Unable to download feedback");
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      const filename = response.headers.get("Content-Disposition")?.match(/filename="?([^";]+)"?/i)?.[1]
+        || `${company.company.replace(/[^a-z0-9]+/gi, "_")}_Interview_Feedback${monthFilter === "all" ? "" : `_${monthFilter}`}.docx`;
+      anchor.href = url;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setDownloadingCompanyId(null);
+    }
+  }
+
+  async function exportStudentFeedback(reportIds, mode, scope = "selected", downloadName = "") {
+    if (!reportIds.length || studentExporting) return;
+    setStudentExporting({ mode, total: reportIds.length });
+    setError("");
+    try {
+      const response = await fetch(`${API_BASE_URL}/admin/reports/student-feedback/export`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${adminToken}` },
+        body: JSON.stringify({ report_ids: reportIds, mode }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        throw new Error(data?.detail || "Unable to export student feedback");
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = downloadName || response.headers.get("Content-Disposition")?.match(/filename="?([^";]+)"?/i)?.[1]
+        || (mode === "combined" ? "Student_Feedback_Combined.docx" : `Student_Feedback_${scope === "all" ? "All" : "Selected"}.zip`);
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setStudentExporting(null);
     }
   }
 
@@ -1845,19 +1943,43 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
       }));
   }, [reports]);
 
-  // Reports grouped by company, filtered by month and publish state.
-  const companies = useMemo(() => {
+  const sharedFilteredReports = useMemo(() => {
     const byPublishState =
       filter === "pending" ? reports.filter((r) => !r.visible_to_student)
       : filter === "published" ? reports.filter((r) => r.visible_to_student)
       : reports;
-    const src = monthFilter === "all"
+    return monthFilter === "all"
       ? byPublishState
       : byPublishState.filter((report) => monthKeyForReport(report) === monthFilter);
+  }, [reports, filter, monthFilter]);
+
+  const studentCompanies = useMemo(() => [...new Set(reports.map((r) => r.company).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b)), [reports]);
+
+  const studentReports = useMemo(() => {
+    const search = studentSearch.trim().toLowerCase();
+    return sharedFilteredReports.filter((report) => {
+      const matchesCompany = studentCompanyFilter === "all" || report.company === studentCompanyFilter;
+      const searchText = [report.student?.name, report.company, report.role].filter(Boolean).join(" ").toLowerCase();
+      return matchesCompany && (!search || searchText.includes(search));
+    });
+  }, [sharedFilteredReports, studentCompanyFilter, studentSearch]);
+
+  const selectedVisibleCount = studentReports.filter((report) => selectedStudentReports.includes(report.id)).length;
+  const allVisibleSelected = studentReports.length > 0 && selectedVisibleCount === studentReports.length;
+  function toggleVisibleStudentSelection(checked) {
+    const visibleIds = studentReports.map((report) => report.id);
+    setSelectedStudentReports((current) => checked
+      ? [...new Set([...current, ...visibleIds])]
+      : current.filter((id) => !visibleIds.includes(id)));
+  }
+
+  // Reports grouped by company, filtered by month and publish state.
+  const companies = useMemo(() => {
     const map = {};
-    src.forEach((r) => {
+    sharedFilteredReports.forEach((r) => {
       const key = r.company || "Company";
-      if (!map[key]) map[key] = { company: key, expectations: null, focus: [], reports: [] };
+      if (!map[key]) map[key] = { company: key, companyId: r.company_id, expectations: null, focus: [], reports: [] };
       map[key].reports.push(r);
       if (!map[key].expectations && r.company_expectations?.expectations) {
         map[key].expectations = r.company_expectations.expectations;
@@ -1865,7 +1987,7 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
       }
     });
     return Object.values(map).sort((a, b) => b.reports.length - a.reports.length);
-  }, [reports, filter, monthFilter]);
+  }, [sharedFilteredReports]);
 
   return (
     <>
@@ -1895,6 +2017,13 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
 
       {gen ? <p className="range-note">Analysing {gen.current} — {gen.done + 1} of {gen.total}. Keep this tab open; this can take a while.</p> : null}
       {error ? <StatusMessage error={error} /> : null}
+
+      {!loading && reports.length ? (
+        <div className="rep-view-tabs" role="tablist" aria-label="Interview feedback view">
+          <button type="button" role="tab" aria-selected={feedbackView === "company"} className={`rep-view-tab ${feedbackView === "company" ? "on" : ""}`} onClick={() => setFeedbackView("company")}>Company Feedback</button>
+          <button type="button" role="tab" aria-selected={feedbackView === "student"} className={`rep-view-tab ${feedbackView === "student" ? "on" : ""}`} onClick={() => setFeedbackView("student")}>Student Feedback</button>
+        </div>
+      ) : null}
 
       {/* Half-finished / not-yet-run transcript extractions: resume each on its own. */}
       {pending.length ? (
@@ -1947,11 +2076,81 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
               ))}
             </div>
           ) : null}
+          {feedbackView === "student" ? (
+            <div className="student-feedback-filters">
+              <label className="student-search">
+                <span>Search students</span>
+                <input value={studentSearch} onChange={(event) => setStudentSearch(event.target.value)} placeholder="Search candidate name, company, or role" />
+              </label>
+              <label className="student-company-select">
+                <span>Company</span>
+                <select value={studentCompanyFilter} onChange={(event) => { setStudentCompanyFilter(event.target.value); setOpenStudentId(null); }}>
+                  <option value="all">All companies</option>
+                  {studentCompanies.map((company) => <option key={company} value={company}>{company}</option>)}
+                </select>
+              </label>
+            </div>
+          ) : null}
         </div>
       ) : null}
 
       {loading ? (
         <PanelLoader />
+      ) : feedbackView === "student" ? (
+        <section className="student-feedback-view">
+          <div className="student-feedback-heading">
+            <p className="eyebrow">All Student Feedback</p>
+            <h2>{studentReports.length} {studentReports.length === 1 ? "interview report" : "interview reports"}</h2>
+            {studentReports.length !== reports.length ? <p className="ov-sub">Filtered from {reports.length} available reports</p> : null}
+          </div>
+          {!studentReports.length ? (
+            <div className="empty-state compact"><p>No student feedback matches these filters.</p></div>
+          ) : (
+            <>
+              <div className="student-export-actions">
+                <label className="student-select-all"><input type="checkbox" checked={allVisibleSelected} onChange={(event) => toggleVisibleStudentSelection(event.target.checked)} /> Select all matching students</label>
+                <span>{selectedVisibleCount} student{selectedVisibleCount === 1 ? "" : "s"} selected</span>
+                <details className="student-export-menu">
+                  <summary>{studentExporting ? "Preparing export…" : "Download all student feedback"}</summary>
+                  <div>
+                    <button type="button" disabled={!!studentExporting} onClick={() => exportStudentFeedback(studentReports.map((report) => report.id), "combined", "all")}>Combined DOCX</button>
+                    <button type="button" disabled={!!studentExporting} onClick={() => exportStudentFeedback(studentReports.map((report) => report.id), "separate", "all")}>Separate DOCX files</button>
+                    <button type="button" disabled={!!studentExporting} onClick={() => exportStudentFeedback(studentReports.map((report) => report.id), "both", "all")}>Combined + Separate</button>
+                  </div>
+                </details>
+                {selectedStudentReports.length ? (
+                  <details className="student-export-menu">
+                    <summary>{studentExporting ? `Generating ${studentExporting.total} document${studentExporting.total === 1 ? "" : "s"}…` : "Download selected"}</summary>
+                    <div>
+                      <button type="button" disabled={!!studentExporting} onClick={() => exportStudentFeedback(selectedStudentReports, "combined")}>Combined DOCX</button>
+                      <button type="button" disabled={!!studentExporting} onClick={() => exportStudentFeedback(selectedStudentReports, "separate")}>Separate DOCX files</button>
+                      <button type="button" disabled={!!studentExporting} onClick={() => exportStudentFeedback(selectedStudentReports, "both")}>Combined + Separate</button>
+                    </div>
+                  </details>
+                ) : null}
+              </div>
+              <div className="rep-list" data-scroll-key="student-reports">
+                {studentReports.map((report) => (
+                  <StudentFeedbackRow
+                    key={report.id}
+                    report={report}
+                    selected={selectedStudentReports.includes(report.id)}
+                    open={openStudentId === report.id}
+                    onSelect={(checked) => setSelectedStudentReports((current) => checked ? [...new Set([...current, report.id])] : current.filter((id) => id !== report.id))}
+                    onToggle={() => setOpenStudentId(openStudentId === report.id ? null : report.id)}
+                    downloading={!!studentExporting}
+                    onDownload={() => exportStudentFeedback(
+                      [report.id],
+                      "combined",
+                      "selected",
+                      `${(report.student?.name || "Student").replace(/[^a-z0-9]+/gi, "_").replace(/^_+|_+$/g, "") || "Student"}_Interview_Feedback.docx`,
+                    )}
+                  />
+                ))}
+              </div>
+            </>
+          )}
+        </section>
       ) : !companies.length ? (
         <div className="empty-state compact">
           <p>
@@ -1971,6 +2170,16 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
                   <strong>{c.company}</strong>
                   <span className="rep-sub">{c.reports.length} candidate{c.reports.length === 1 ? "" : "s"}{c.expectations ? " · RSA ready" : ""}</span>
                 </span>
+                {c.companyId ? (
+                  <button
+                    type="button"
+                    className="rep-download"
+                    disabled={downloadingCompanyId === c.companyId}
+                    onClick={(event) => { event.stopPropagation(); downloadCompanyFeedback(c); }}
+                  >
+                    {downloadingCompanyId === c.companyId ? <><Loader2 className="spin" size={14} /> Preparing…</> : <><Download size={14} /> {monthFilter === "all" ? "Download all feedback" : "Download month feedback"}</>}
+                  </button>
+                ) : null}
                 <span className="rep-date">{c.reports.length}</span>
               </div>
               {openCompany === c.company ? (
