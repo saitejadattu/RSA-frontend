@@ -49,6 +49,12 @@ import "./styles.css";
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
 const ACCESS_TOKEN_KEY = "rsa_student_access_token";
 const ADMIN_TOKEN_KEY = "rsa_admin_token";
+const APPLICATION_STATUS_OPTIONS = [
+  "APPLIED", "PROFILE_SHARED", "SHORTLISTED", "NOT_SHORTLISTED",
+  "INTERVIEW_SCHEDULED", "INTERVIEW_IN_PROGRESS", "INTERVIEW_COMPLETED",
+  "INTERVIEW_NOT_ATTENDED", "SELECTED", "OFFER_PENDING", "OFFER_RELEASED",
+  "OFFER_ACCEPTED", "OFFER_REJECTED", "JOINED", "REJECTED", "DROPPED",
+];
 
 /* ------------------------------------------------------------------ *
  *  Hash routing
@@ -1741,6 +1747,7 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
   const [gen, setGen] = useState(null); // {done,total,current} while generating
   const [genOne, setGenOne] = useState(null); // session id being (re)generated on its own
   const [filter, setFilter] = useState("all"); // all | pending | published (report publish state)
+  const [monthFilter, setMonthFilter] = useState("all"); // all | YYYY-MM (report generation month)
   const [showPending, setShowPending] = useState(false); // reveal the pending-extractions list
 
   function load() {
@@ -1813,12 +1820,40 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
 
   const pendingReports = reports.filter((r) => !r.visible_to_student).length;
 
-  // Reports grouped by company, filtered by publish state (All / Pending / Published).
+  // UTC keeps the month assignment consistent for every admin near midnight.
+  const monthKeyForReport = (report) => {
+    const value = report.generated_at || report.created_at;
+    if (!value) return null;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return null;
+    return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+  };
+
+  const reportMonths = useMemo(() => {
+    const counts = new Map();
+    reports.forEach((report) => {
+      const key = monthKeyForReport(report);
+      if (key) counts.set(key, (counts.get(key) || 0) + 1);
+    });
+    return [...counts.entries()]
+      .sort(([a], [b]) => b.localeCompare(a))
+      .map(([key, count]) => ({
+        key,
+        count,
+        label: new Intl.DateTimeFormat("en", { month: "short", year: "numeric", timeZone: "UTC" })
+          .format(new Date(`${key}-01T00:00:00Z`)),
+      }));
+  }, [reports]);
+
+  // Reports grouped by company, filtered by month and publish state.
   const companies = useMemo(() => {
-    const src =
+    const byPublishState =
       filter === "pending" ? reports.filter((r) => !r.visible_to_student)
       : filter === "published" ? reports.filter((r) => r.visible_to_student)
       : reports;
+    const src = monthFilter === "all"
+      ? byPublishState
+      : byPublishState.filter((report) => monthKeyForReport(report) === monthFilter);
     const map = {};
     src.forEach((r) => {
       const key = r.company || "Company";
@@ -1830,7 +1865,7 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
       }
     });
     return Object.values(map).sort((a, b) => b.reports.length - a.reports.length);
-  }, [reports, filter]);
+  }, [reports, filter, monthFilter]);
 
   return (
     <>
@@ -1887,16 +1922,31 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
       ) : null}
 
       {!loading && reports.length ? (
-        <div className="rep-subtabs">
-          <button type="button" className={`rep-chip ${filter === "all" ? "on" : ""}`} onClick={() => setFilter("all")}>
-            All ({reports.length})
-          </button>
-          <button type="button" className={`rep-chip ${filter === "pending" ? "on" : ""}`} onClick={() => setFilter("pending")}>
-            Pending ({pendingReports})
-          </button>
-          <button type="button" className={`rep-chip ${filter === "published" ? "on" : ""}`} onClick={() => setFilter("published")}>
-            Published ({reports.length - pendingReports})
-          </button>
+        <div className="rep-filters">
+          <div className="rep-subtabs" aria-label="Report status filter">
+            <button type="button" className={`rep-chip ${filter === "all" ? "on" : ""}`} onClick={() => setFilter("all")}>
+              All ({reports.length})
+            </button>
+            <button type="button" className={`rep-chip ${filter === "pending" ? "on" : ""}`} onClick={() => setFilter("pending")}>
+              Pending ({pendingReports})
+            </button>
+            <button type="button" className={`rep-chip ${filter === "published" ? "on" : ""}`} onClick={() => setFilter("published")}>
+              Published ({reports.length - pendingReports})
+            </button>
+          </div>
+          {reportMonths.length ? (
+            <div className="rep-month-tabs" aria-label="Report month filter">
+              <span className="rep-filter-label">Month</span>
+              <button type="button" className={`rep-chip ${monthFilter === "all" ? "on" : ""}`} onClick={() => { setMonthFilter("all"); setOpenCompany(null); }}>
+                All months
+              </button>
+              {reportMonths.map((month) => (
+                <button key={month.key} type="button" className={`rep-chip ${monthFilter === month.key ? "on" : ""}`} onClick={() => { setMonthFilter(month.key); setOpenCompany(null); }}>
+                  {month.label} ({month.count})
+                </button>
+              ))}
+            </div>
+          ) : null}
         </div>
       ) : null}
 
@@ -1907,6 +1957,7 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
           <p>
             {filter === "pending" ? "No pending reports — everything is published."
               : filter === "published" ? "No published reports yet."
+              : monthFilter !== "all" ? "No interview reports for this month."
               : "No interview reports yet."}
           </p>
         </div>
@@ -2834,6 +2885,9 @@ function StudentProfileView({ adminToken, studentId, navigate, onBack }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [filter, setFilter] = useState("all");
+  const [updatingPlacement, setUpdatingPlacement] = useState(false);
+  const [updatingApplicationId, setUpdatingApplicationId] = useState(null);
+  const [updateError, setUpdateError] = useState("");
 
   useEffect(() => {
     let live = true;
@@ -2848,6 +2902,41 @@ function StudentProfileView({ adminToken, studentId, navigate, onBack }) {
       live = false;
     };
   }, [studentId, adminToken]);
+
+  async function updatePlacement(placedStatus) {
+    setUpdatingPlacement(true);
+    setUpdateError("");
+    try {
+      const student = await apiRequest(`/admin/students/${studentId}/placement`, {
+        method: "PATCH", adminToken, body: { placed_status: placedStatus },
+      });
+      setData((current) => current ? { ...current, student: { ...current.student, placed_status: student.placed_status } } : current);
+    } catch (e) {
+      setUpdateError(e.message);
+    } finally {
+      setUpdatingPlacement(false);
+    }
+  }
+
+  async function updateApplicationStatus(applicationId, newStatus) {
+    if (!applicationId) return;
+    setUpdatingApplicationId(applicationId);
+    setUpdateError("");
+    try {
+      const result = await apiRequest(`/applications/${applicationId}/status`, {
+        method: "POST", adminToken, body: { new_status: newStatus },
+      });
+      const status = result.application?.current_status || newStatus;
+      setData((current) => current ? {
+        ...current,
+        applications: current.applications.map((application) => application.id === applicationId ? { ...application, status } : application),
+      } : current);
+    } catch (e) {
+      setUpdateError(e.message);
+    } finally {
+      setUpdatingApplicationId(null);
+    }
+  }
 
   const s = data?.student;
   const stats = data?.stats || {};
@@ -2876,7 +2965,7 @@ function StudentProfileView({ adminToken, studentId, navigate, onBack }) {
         </div>
       </header>
 
-      {error ? <StatusMessage error={error} /> : null}
+      {error || updateError ? <StatusMessage error={error || updateError} /> : null}
 
       {loading || !data ? (
         <PanelLoader />
@@ -2898,9 +2987,14 @@ function StudentProfileView({ adminToken, studentId, navigate, onBack }) {
                   <FileText size={15} /> Resume
                 </a>
               ) : null}
-              {s.placed_status ? (
-                <span className="status-chip" style={{ color: "#15803d", borderColor: "#15803d" }}>Placed</span>
-              ) : null}
+              <button
+                type="button"
+                className={s.placed_status ? "status-chip placement-toggle placed" : "status-chip placement-toggle"}
+                onClick={() => updatePlacement(!s.placed_status)}
+                disabled={updatingPlacement}
+              >
+                {updatingPlacement ? "Saving…" : s.placed_status ? "Placed — mark unplaced" : "Mark as placed"}
+              </button>
             </div>
           </section>
 
@@ -2955,7 +3049,17 @@ function StudentProfileView({ adminToken, studentId, navigate, onBack }) {
                         </button>
                         <span>{a.role} · {a.category}</span>
                       </div>
-                      <div><StatusChip status={a.status} /></div>
+                      <div className="application-status-control">
+                        <StatusChip status={a.status} />
+                        <select
+                          aria-label={`Update status for ${a.company}`}
+                          value={a.status || "APPLIED"}
+                          disabled={updatingApplicationId === a.id || !a.id}
+                          onChange={(event) => updateApplicationStatus(a.id, event.target.value)}
+                        >
+                          {APPLICATION_STATUS_OPTIONS.map((status) => <option key={status} value={status}>{formatStatus(status)}</option>)}
+                        </select>
+                      </div>
                       <div><span>{formatDate(a.applied_at)}</span></div>
                       <div className="link-group">
                         {links.length ? (
@@ -4923,6 +5027,7 @@ function AdminStudentsView({ students, loading, navigate = () => {} }) {
   const [showAll, setShowAll] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [sortBy, setSortBy] = useState("name");
+  const [placementFilter, setPlacementFilter] = useState("all");
 
   if (loading) return <PanelLoader />;
 
@@ -4947,14 +5052,17 @@ function AdminStudentsView({ students, loading, navigate = () => {} }) {
     );
   }
 
-  // Filter students based on search
+  // Filter students by search and placement outcome.
   const filteredStudents = students.filter((student) => {
     const searchLower = searchTerm.toLowerCase();
-    return (
+    const matchesSearch = (
       (student.name || "").toLowerCase().includes(searchLower) ||
       (student.phone || "").includes(searchTerm) ||
       (student.email || "").toLowerCase().includes(searchLower)
     );
+    const matchesPlacement = placementFilter === "all"
+      || (placementFilter === "placed" ? student.placed_status : !student.placed_status);
+    return matchesSearch && matchesPlacement;
   });
 
   // Sort students
@@ -5008,6 +5116,14 @@ function AdminStudentsView({ students, loading, navigate = () => {} }) {
                 <option value="shortlisted_asc">Least Shortlisted</option>
                 <option value="not_shortlisted_desc">Most Not Shortlisted</option>
                 <option value="not_shortlisted_asc">Least Not Shortlisted</option>
+              </select>
+            </div>
+            <div className="sort-controls">
+              <label>Placement:</label>
+              <select value={placementFilter} onChange={(e) => setPlacementFilter(e.target.value)} className="sort-select">
+                <option value="all">All students</option>
+                <option value="placed">Placed</option>
+                <option value="not_placed">Not placed</option>
               </select>
             </div>
           </div>
@@ -5076,7 +5192,7 @@ function AdminStudentsView({ students, loading, navigate = () => {} }) {
           })}
         </div>
       ) : (
-        <div className="empty-state compact"><p>{searchTerm ? "No students match your search." : "No students found."}</p></div>
+        <div className="empty-state compact"><p>{searchTerm || placementFilter !== "all" ? "No students match your filters." : "No students found."}</p></div>
       )}
     </section>
   );

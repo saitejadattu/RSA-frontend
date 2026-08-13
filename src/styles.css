@@ -3495,7 +3495,16 @@ input:focus {
 .rep-pending-main strong { font-size: 13.5px; }
 .rep-pending-main span { font-size: 12px; color: #8a7a5a; }
 
-.rep-subtabs { display: flex; gap: 6px; margin-bottom: 14px; }
+.rep-filters { margin-bottom: 14px; }
+.rep-subtabs { display: flex; gap: 6px; }
+.rep-month-tabs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.rep-filter-label { font-size: 12.5px; font-weight: 700; color: #475467; margin-right: 2px; }
 .rep-chip {
   border: 1px solid #e6ebea;
   background: #fff;
@@ -3723,6 +3732,40 @@ input:focus {
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+.placement-toggle {
+  cursor: pointer;
+  background: #fff;
+}
+
+.placement-toggle.placed {
+  color: #15803d;
+  border-color: #15803d;
+  background: #f0fdf4;
+}
+
+.placement-toggle:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.application-status-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.application-status-control select {
+  max-width: 170px;
+  padding: 5px 8px;
+  border: 1px solid #d7dee6;
+  border-radius: 6px;
+  background: #fff;
+  color: #334155;
+  font: inherit;
+  font-size: 12px;
 }
 
 .filter-chips {
