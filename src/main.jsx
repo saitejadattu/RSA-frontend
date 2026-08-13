@@ -1736,13 +1736,13 @@ function ReportRow({ report, open, onToggle, onPublish, busy }) {
   );
 }
 
-function StudentFeedbackRow({ report, open, onToggle, selected, onSelect, onDownload, downloading }) {
+function StudentFeedbackRow({ report, open, onToggle, selected, onSelect, showSelection, onDownload, downloading }) {
   return (
     <div className={`rep-item student-feedback-row ${open ? "open" : ""}`}>
       <div className="rep-row">
-        <label className="student-report-check" onClick={(event) => event.stopPropagation()}>
+        {showSelection ? <label className="student-report-check" onClick={(event) => event.stopPropagation()}>
           <input type="checkbox" checked={selected} onChange={(event) => onSelect(event.target.checked)} aria-label={`Select ${report.student?.name || "student"}`} />
-        </label>
+        </label> : null}
         <span className="rep-main">
           <strong>{report.student?.name || "Student"}</strong>
           <span className="rep-sub">{report.company || "Company"} Â· {report.role || "â€”"}</span>
@@ -1777,12 +1777,25 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
   const [genOne, setGenOne] = useState(null); // session id being (re)generated on its own
   const [filter, setFilter] = useState("all"); // all | pending | published (report publish state)
   const [monthFilter, setMonthFilter] = useState("all"); // all | YYYY-MM (report generation month)
+  const [companyFilter, setCompanyFilter] = useState("all");
   const [feedbackView, setFeedbackView] = useState("company"); // company | student
   const [studentSearch, setStudentSearch] = useState("");
   const [studentCompanyFilter, setStudentCompanyFilter] = useState("all");
   const [openStudentId, setOpenStudentId] = useState(null);
   const [selectedStudentReports, setSelectedStudentReports] = useState([]);
   const [studentExporting, setStudentExporting] = useState(null);
+  const [companyExporting, setCompanyExporting] = useState(null);
+  const [studentDownloadStep, setStudentDownloadStep] = useState("idle");
+  const [studentDownloadError, setStudentDownloadError] = useState("");
+  const [studentDownloadFormat, setStudentDownloadFormat] = useState("combined");
+  const [companyDownloadStep, setCompanyDownloadStep] = useState("idle");
+  const [companyDownloadError, setCompanyDownloadError] = useState("");
+  const [selectedCompanies, setSelectedCompanies] = useState([]);
+  const [companyExportDialog, setCompanyExportDialog] = useState(false);
+  const [companyExportScope, setCompanyExportScope] = useState("filtered");
+  const [companyExportFormat, setCompanyExportFormat] = useState("combined");
+  const [oneCompany, setOneCompany] = useState("");
+  const [companyExportValidation, setCompanyExportValidation] = useState("");
   const [showPending, setShowPending] = useState(false); // reveal the pending-extractions list
   const [downloadingCompanyId, setDownloadingCompanyId] = useState(null);
 
@@ -1848,7 +1861,7 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
     }
   }
 
-  async function exportStudentFeedback(reportIds, mode, scope = "selected", downloadName = "") {
+  async function exportStudentFeedback(reportIds, mode, scope = "selected", downloadName = "", onDone) {
     if (!reportIds.length || studentExporting) return;
     setStudentExporting({ mode, total: reportIds.length });
     setError("");
@@ -1872,10 +1885,43 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
       anchor.click();
       anchor.remove();
       URL.revokeObjectURL(url);
+      onDone?.();
     } catch (err) {
       setError(err.message);
     } finally {
       setStudentExporting(null);
+    }
+  }
+
+  async function exportCompanyFeedback(reportIds, mode, onDone) {
+    if (!reportIds.length || companyExporting) return;
+    setCompanyExporting(mode);
+    setError("");
+    try {
+      const response = await fetch(`${API_BASE_URL}/admin/reports/company-feedback/export`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${adminToken}` },
+        body: JSON.stringify({ report_ids: reportIds, mode }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        throw new Error(data?.detail || "Unable to export company feedback");
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = response.headers.get("Content-Disposition")?.match(/filename="?([^";]+)"?/i)?.[1]
+        || (mode === "combined" ? "Company_Feedback_Combined.docx" : "Company_Feedback_Selected.zip");
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      onDone?.();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setCompanyExporting(null);
     }
   }
 
@@ -1948,10 +1994,11 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
       filter === "pending" ? reports.filter((r) => !r.visible_to_student)
       : filter === "published" ? reports.filter((r) => r.visible_to_student)
       : reports;
-    return monthFilter === "all"
+    const byMonth = monthFilter === "all"
       ? byPublishState
       : byPublishState.filter((report) => monthKeyForReport(report) === monthFilter);
-  }, [reports, filter, monthFilter]);
+    return companyFilter === "all" ? byMonth : byMonth.filter((report) => report.company === companyFilter);
+  }, [reports, filter, monthFilter, companyFilter]);
 
   const studentCompanies = useMemo(() => [...new Set(reports.map((r) => r.company).filter(Boolean))]
     .sort((a, b) => a.localeCompare(b)), [reports]);
@@ -1973,6 +2020,27 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
       ? [...new Set([...current, ...visibleIds])]
       : current.filter((id) => !visibleIds.includes(id)));
   }
+  function exitStudentDownloadMode() {
+    setStudentDownloadStep("idle");
+    setStudentDownloadError("");
+    setSelectedStudentReports([]);
+  }
+  function continueStudentDownload() {
+    const visibleSelected = studentReports.filter((report) => selectedStudentReports.includes(report.id));
+    if (!visibleSelected.length) return setStudentDownloadError("Please select at least one student to continue.");
+    setStudentDownloadError("");
+    setStudentDownloadStep("format");
+  }
+  function exitCompanyDownloadMode() {
+    setCompanyDownloadStep("idle");
+    setCompanyDownloadError("");
+    setSelectedCompanies([]);
+  }
+  function continueCompanyDownload() {
+    if (!selectedMatchingCompanyCount) return setCompanyDownloadError("Please select at least one company to continue.");
+    setCompanyDownloadError("");
+    setCompanyDownloadStep("format");
+  }
 
   // Reports grouped by company, filtered by month and publish state.
   const companies = useMemo(() => {
@@ -1988,6 +2056,40 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
     });
     return Object.values(map).sort((a, b) => b.reports.length - a.reports.length);
   }, [sharedFilteredReports]);
+
+  const matchingCompanyNames = companies.map((company) => company.company);
+  const selectedMatchingCompanyCount = matchingCompanyNames.filter((name) => selectedCompanies.includes(name)).length;
+  const allMatchingCompaniesSelected = matchingCompanyNames.length > 0 && selectedMatchingCompanyCount === matchingCompanyNames.length;
+  function toggleMatchingCompanies(checked) {
+    setSelectedCompanies((current) => checked
+      ? [...new Set([...current, ...matchingCompanyNames])]
+      : current.filter((name) => !matchingCompanyNames.includes(name)));
+  }
+  function openCompanyExportDialog() {
+    setCompanyExportValidation("");
+    setCompanyExportScope("filtered");
+    setCompanyExportFormat("combined");
+    setOneCompany(matchingCompanyNames[0] || studentCompanies[0] || "");
+    setCompanyExportDialog(true);
+  }
+  function submitCompanyExport() {
+    let sourceReports = [];
+    if (companyExportScope === "one") {
+      if (!oneCompany) return setCompanyExportValidation("Choose one company to download.");
+      sourceReports = reports.filter((report) => report.company === oneCompany);
+    } else if (companyExportScope === "selected") {
+      if (!selectedCompanies.length) return setCompanyExportValidation("Select at least one company first.");
+      sourceReports = reports.filter((report) => selectedCompanies.includes(report.company));
+    } else if (companyExportScope === "filtered") {
+      sourceReports = sharedFilteredReports;
+    } else {
+      sourceReports = reports;
+    }
+    if (!sourceReports.length) return setCompanyExportValidation("No interview feedback matches this download scope.");
+    setCompanyExportValidation("");
+    setCompanyExportDialog(false);
+    exportCompanyFeedback(sourceReports.map((report) => report.id), companyExportFormat);
+  }
 
   return (
     <>
@@ -2090,7 +2192,17 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
                 </select>
               </label>
             </div>
-          ) : null}
+          ) : (
+            <div className="student-feedback-filters">
+              <label className="student-company-select">
+                <span>Company</span>
+                <select value={companyFilter} onChange={(event) => { setCompanyFilter(event.target.value); setOpenCompany(null); }}>
+                  <option value="all">All companies</option>
+                  {studentCompanies.map((company) => <option key={company} value={company}>{company}</option>)}
+                </select>
+              </label>
+            </div>
+          )}
         </div>
       ) : null}
 
@@ -2108,9 +2220,11 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
           ) : (
             <>
               <div className="student-export-actions">
-                <label className="student-select-all"><input type="checkbox" checked={allVisibleSelected} onChange={(event) => toggleVisibleStudentSelection(event.target.checked)} /> Select all matching students</label>
-                <span>{selectedVisibleCount} student{selectedVisibleCount === 1 ? "" : "s"} selected</span>
-                <details className="student-export-menu">
+                {studentDownloadStep === "idle" ? <button type="button" className="company-download-trigger" onClick={() => setStudentDownloadStep("select")}>Download feedback</button> : <><strong>Select student feedback to download</strong><button type="button" onClick={exitStudentDownloadMode}>Cancel</button><button type="button" className="company-download-trigger" onClick={continueStudentDownload}>Continue</button></>}
+                {studentDownloadError ? <span className="company-export-error">{studentDownloadError}</span> : null}
+                <label className="student-select-all" style={{ display: studentDownloadStep === "select" ? undefined : "none" }}><input type="checkbox" checked={allVisibleSelected} onChange={(event) => toggleVisibleStudentSelection(event.target.checked)} /> Select all matching students</label>
+                <span style={{ display: studentDownloadStep === "select" ? undefined : "none" }}>{selectedVisibleCount} student{selectedVisibleCount === 1 ? "" : "s"} selected</span>
+                <details className="student-export-menu" style={{ display: "none" }}>
                   <summary>{studentExporting ? "Preparing export…" : "Download all student feedback"}</summary>
                   <div>
                     <button type="button" disabled={!!studentExporting} onClick={() => exportStudentFeedback(studentReports.map((report) => report.id), "combined", "all")}>Combined DOCX</button>
@@ -2119,7 +2233,7 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
                   </div>
                 </details>
                 {selectedStudentReports.length ? (
-                  <details className="student-export-menu">
+                  <details className="student-export-menu" style={{ display: "none" }}>
                     <summary>{studentExporting ? `Generating ${studentExporting.total} document${studentExporting.total === 1 ? "" : "s"}…` : "Download selected"}</summary>
                     <div>
                       <button type="button" disabled={!!studentExporting} onClick={() => exportStudentFeedback(selectedStudentReports, "combined")}>Combined DOCX</button>
@@ -2135,6 +2249,7 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
                     key={report.id}
                     report={report}
                     selected={selectedStudentReports.includes(report.id)}
+                    showSelection={studentDownloadStep === "select"}
                     open={openStudentId === report.id}
                     onSelect={(checked) => setSelectedStudentReports((current) => checked ? [...new Set([...current, report.id])] : current.filter((id) => id !== report.id))}
                     onToggle={() => setOpenStudentId(openStudentId === report.id ? null : report.id)}
@@ -2161,16 +2276,24 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
           </p>
         </div>
       ) : (
-        <div className="rep-list" data-scroll-key="reports">
-          {companies.map((c) => (
+        <>
+          <div className="company-export-toolbar">
+            {companyDownloadStep === "idle" ? <button type="button" className="company-download-trigger" disabled={!!companyExporting} onClick={() => setCompanyDownloadStep("select")}>{companyExporting ? "Preparing export…" : "Download feedback"}</button> : <><strong>Select company feedback to download</strong><label className="student-select-all"><input type="checkbox" checked={allMatchingCompaniesSelected} onChange={(event) => toggleMatchingCompanies(event.target.checked)} /> Select all matching companies</label><span>{selectedMatchingCompanyCount} compan{selectedMatchingCompanyCount === 1 ? "y" : "ies"} selected</span><button type="button" onClick={exitCompanyDownloadMode}>Cancel</button><button type="button" className="company-download-trigger" onClick={continueCompanyDownload}>Continue</button></>}
+            {companyDownloadError ? <span className="company-export-error">{companyDownloadError}</span> : null}
+          </div>
+          <div className="rep-list" data-scroll-key="reports">
+            {companies.map((c) => (
             <div className={`rep-item ${openCompany === c.company ? "open" : ""}`} key={c.company}>
               <div className="rep-row" onClick={() => setOpenCompany(openCompany === c.company ? null : c.company)}>
+                {companyDownloadStep === "select" ? <label className="student-report-check" onClick={(event) => event.stopPropagation()}>
+                  <input type="checkbox" checked={selectedCompanies.includes(c.company)} onChange={(event) => setSelectedCompanies((current) => event.target.checked ? [...new Set([...current, c.company])] : current.filter((name) => name !== c.company))} aria-label={`Select ${c.company}`} />
+                </label> : null}
                 <span className="rep-caret">{openCompany === c.company ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</span>
                 <span className="rep-main">
                   <strong>{c.company}</strong>
                   <span className="rep-sub">{c.reports.length} candidate{c.reports.length === 1 ? "" : "s"}{c.expectations ? " · RSA ready" : ""}</span>
                 </span>
-                {c.companyId ? (
+                {false && c.companyId ? (
                   <button
                     type="button"
                     className="rep-download"
@@ -2208,9 +2331,43 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
                 </div>
               ) : null}
             </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        </>
       )}
+      {studentDownloadStep === "format" || studentDownloadStep === "confirm" ? (
+        <div className="company-export-backdrop" role="presentation">
+          <section className="company-export-dialog" role="dialog" aria-modal="true">
+            {studentDownloadStep === "format" ? <><h2>Download Student Feedback</h2><p>{selectedVisibleCount} student{selectedVisibleCount === 1 ? "" : "s"} selected</p><h3>Format</h3><label><input type="radio" checked={studentDownloadFormat === "combined"} onChange={() => setStudentDownloadFormat("combined")} /> Combined DOCX</label><label><input type="radio" checked={studentDownloadFormat === "separate"} onChange={() => setStudentDownloadFormat("separate")} /> Separate DOCX files</label><label><input type="radio" checked={studentDownloadFormat === "both"} onChange={() => setStudentDownloadFormat("both")} /> Combined + Separate</label><div className="company-dialog-actions"><button type="button" onClick={() => setStudentDownloadStep("select")}>Back</button><button type="button" className="company-download-trigger" onClick={() => setStudentDownloadStep("confirm")}>Continue</button></div></> : <><h2>Confirm Download</h2><p>You are about to download {selectedVisibleCount} student{selectedVisibleCount === 1 ? "" : "s"}.</p><p><strong>Format:</strong> {studentDownloadFormat === "combined" ? "Combined DOCX" : studentDownloadFormat === "separate" ? "Separate DOCX files" : "Combined + Separate"}</p><div className="company-dialog-actions"><button type="button" onClick={exitStudentDownloadMode}>Cancel</button><button type="button" className="company-download-trigger" onClick={() => exportStudentFeedback(selectedStudentReports, studentDownloadFormat, "selected", "", exitStudentDownloadMode)}>Confirm &amp; Download</button></div></>}
+          </section>
+        </div>
+      ) : null}
+      {companyDownloadStep === "format" || companyDownloadStep === "confirm" ? (
+        <div className="company-export-backdrop" role="presentation">
+          <section className="company-export-dialog" role="dialog" aria-modal="true">
+            {companyDownloadStep === "format" ? <><h2>Download Company Feedback</h2><p>{selectedMatchingCompanyCount} compan{selectedMatchingCompanyCount === 1 ? "y" : "ies"} selected</p><h3>Format</h3><label><input type="radio" checked={companyExportFormat === "combined"} onChange={() => setCompanyExportFormat("combined")} /> Combined DOCX</label><label><input type="radio" checked={companyExportFormat === "separate"} onChange={() => setCompanyExportFormat("separate")} /> Separate DOCX files</label><label><input type="radio" checked={companyExportFormat === "both"} onChange={() => setCompanyExportFormat("both")} /> Combined + Separate</label><div className="company-dialog-actions"><button type="button" onClick={() => setCompanyDownloadStep("select")}>Back</button><button type="button" className="company-download-trigger" onClick={() => setCompanyDownloadStep("confirm")}>Continue</button></div></> : <><h2>Confirm Download</h2><p>You are about to download {selectedMatchingCompanyCount} compan{selectedMatchingCompanyCount === 1 ? "y" : "ies"}.</p><p><strong>Format:</strong> {companyExportFormat === "combined" ? "Combined DOCX" : companyExportFormat === "separate" ? "Separate DOCX files" : "Combined + Separate"}</p><div className="company-dialog-actions"><button type="button" onClick={exitCompanyDownloadMode}>Cancel</button><button type="button" className="company-download-trigger" onClick={() => exportCompanyFeedback(reports.filter((report) => selectedCompanies.includes(report.company)).map((report) => report.id), companyExportFormat, exitCompanyDownloadMode)}>Confirm &amp; Download</button></div></>}
+          </section>
+        </div>
+      ) : null}
+      {companyExportDialog ? (
+        <div className="company-export-backdrop" role="presentation" onMouseDown={() => !companyExporting && setCompanyExportDialog(false)}>
+          <section className="company-export-dialog" role="dialog" aria-modal="true" aria-labelledby="company-export-title" onMouseDown={(event) => event.stopPropagation()}>
+            <h2 id="company-export-title">Download Company Feedback</h2>
+            <h3>Download scope</h3>
+            <label><input type="radio" name="company-scope" checked={companyExportScope === "one"} onChange={() => setCompanyExportScope("one")} /> One company</label>
+            {companyExportScope === "one" ? <label className="company-dialog-select">Company<select value={oneCompany} onChange={(event) => setOneCompany(event.target.value)}><option value="">Select company</option>{studentCompanies.map((company) => <option key={company} value={company}>{company}</option>)}</select></label> : null}
+            <label><input type="radio" name="company-scope" checked={companyExportScope === "selected"} onChange={() => setCompanyExportScope("selected")} /> Selected companies ({selectedCompanies.length})</label>
+            <label><input type="radio" name="company-scope" checked={companyExportScope === "filtered"} onChange={() => setCompanyExportScope("filtered")} /> Current filtered companies ({companies.length})</label>
+            <label><input type="radio" name="company-scope" checked={companyExportScope === "all"} onChange={() => setCompanyExportScope("all")} /> All companies</label>
+            <h3>Format</h3>
+            <label><input type="radio" name="company-format" checked={companyExportFormat === "combined"} onChange={() => setCompanyExportFormat("combined")} /> Combined DOCX</label>
+            <label><input type="radio" name="company-format" checked={companyExportFormat === "separate"} onChange={() => setCompanyExportFormat("separate")} /> Separate DOCX files</label>
+            <label><input type="radio" name="company-format" checked={companyExportFormat === "both"} onChange={() => setCompanyExportFormat("both")} /> Combined + Separate</label>
+            {companyExportValidation ? <p className="company-export-error">{companyExportValidation}</p> : null}
+            <div className="company-dialog-actions"><button type="button" onClick={() => setCompanyExportDialog(false)}>Cancel</button><button type="button" className="company-download-trigger" onClick={submitCompanyExport}>Download</button></div>
+          </section>
+        </div>
+      ) : null}
     </>
   );
 }
