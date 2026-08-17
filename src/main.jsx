@@ -1791,15 +1791,21 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
   const [monthFilter, setMonthFilter] = useState("all"); // all | YYYY-MM (report generation month)
   const [companyFilter, setCompanyFilter] = useState("all");
   const [feedbackView, setFeedbackView] = useState("company"); // company | student
+  const [studentFeedbackMode, setStudentFeedbackMode] = useState("interview"); // interview | student
   const [studentSearch, setStudentSearch] = useState("");
   const [studentCompanyFilter, setStudentCompanyFilter] = useState("all");
+  const [studentCompanyCountFilter, setStudentCompanyCountFilter] = useState("all");
   const [openStudentId, setOpenStudentId] = useState(null);
   const [selectedStudentReports, setSelectedStudentReports] = useState([]);
+  const [selectedStudentIds, setSelectedStudentIds] = useState([]);
   const [studentExporting, setStudentExporting] = useState(null);
   const [companyExporting, setCompanyExporting] = useState(null);
   const [studentDownloadStep, setStudentDownloadStep] = useState("idle");
   const [studentDownloadError, setStudentDownloadError] = useState("");
   const [studentDownloadFormat, setStudentDownloadFormat] = useState("combined");
+  const [studentRowDialog, setStudentRowDialog] = useState(null);
+  const [studentRowScope, setStudentRowScope] = useState("single");
+  const [studentRowFormat, setStudentRowFormat] = useState("combined");
   const [companyDownloadStep, setCompanyDownloadStep] = useState("idle");
   const [companyDownloadError, setCompanyDownloadError] = useState("");
   const [selectedCompanies, setSelectedCompanies] = useState([]);
@@ -1842,6 +1848,25 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
     }
   }
 
+  function sanitizeFilenamePart(text) {
+    if (!text) return "Item";
+    return text.replace(/\s+/g, "_").replace(/[^A-Za-z0-9_]/g, "").replace(/_+/g, "_").replace(/^_+|_+$/g, "") || "Item";
+  }
+
+  function buildStudentFeedbackFilename(studentName, companyNames, scope, mode) {
+    const safeName = sanitizeFilenamePart(studentName);
+    if (!safeName) return mode === "combined" ? "Student_Feedback_Combined.docx" : "Student_Feedback_Selected.zip";
+
+    if (scope === "single" && companyNames && companyNames.length > 0) {
+      const safeCompany = sanitizeFilenamePart(companyNames[0]);
+      return `${safeName}_${safeCompany}_Interview_Feedback.docx`;
+    }
+    if (scope === "selected" && companyNames && companyNames.length > 1) {
+      return `${safeName}_Selected_Companies_Interview_Feedback.docx`;
+    }
+    return mode === "combined" ? `${safeName}_Interview_Feedback.docx` : `${safeName}_Interview_Feedback.zip`;
+  }
+
   async function downloadCompanyFeedback(company) {
     if (!company.companyId || downloadingCompanyId) return;
     setDownloadingCompanyId(company.companyId);
@@ -1873,7 +1898,7 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
     }
   }
 
-  async function exportStudentFeedback(reportIds, mode, scope = "selected", downloadName = "", onDone) {
+  async function exportStudentFeedback(reportIds, mode, scope = "selected", studentName = "", companyNames = [], onDone, studentId = null) {
     if (!reportIds.length || studentExporting) return;
     setStudentExporting({ mode, total: reportIds.length });
     setError("");
@@ -1881,7 +1906,7 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
       const response = await fetch(`${API_BASE_URL}/admin/reports/student-feedback/export`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${adminToken}` },
-        body: JSON.stringify({ report_ids: reportIds, mode }),
+        body: JSON.stringify({ report_ids: reportIds, mode, scope, student_id: studentId }),
       });
       if (!response.ok) {
         const data = await response.json().catch(() => null);
@@ -1891,8 +1916,8 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
-      anchor.download = downloadName || response.headers.get("Content-Disposition")?.match(/filename="?([^";]+)"?/i)?.[1]
-        || (mode === "combined" ? "Student_Feedback_Combined.docx" : `Student_Feedback_${scope === "all" ? "All" : "Selected"}.zip`);
+      const downloadName = buildStudentFeedbackFilename(studentName, companyNames, scope, mode);
+      anchor.download = downloadName;
       document.body.appendChild(anchor);
       anchor.click();
       anchor.remove();
@@ -2024,9 +2049,56 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
     });
   }, [sharedFilteredReports, studentCompanyFilter, studentSearch]);
 
-  const selectedVisibleCount = studentReports.filter((report) => selectedStudentReports.includes(report.id)).length;
-  const allVisibleSelected = studentReports.length > 0 && selectedVisibleCount === studentReports.length;
+  const groupedStudentReports = useMemo(() => {
+    const map = new Map();
+    studentReports.forEach((report) => {
+      const studentId = report.student_id ?? report.student?.id ?? report.student?._id ?? null;
+      if (!studentId) return;
+      const key = String(studentId);
+      if (!map.has(key)) {
+        map.set(key, {
+          student_id: key,
+          student_name: report.student?.name || "Student",
+          reports: [],
+          company_keys: new Set(),
+        });
+      }
+      const group = map.get(key);
+      group.reports.push(report);
+      const companyId = report.company_id ?? report.company?.id ?? report.company?._id ?? report.company ?? null;
+      if (companyId != null) group.company_keys.add(String(companyId));
+    });
+    return [...map.values()].map((group) => ({
+      student_id: group.student_id,
+      student_name: group.student_name,
+      reports: group.reports,
+      company_count: group.company_keys.size,
+      interview_count: group.reports.length,
+    })).sort((a, b) => a.student_name.localeCompare(b.student_name));
+  }, [studentReports]);
+
+  const filteredStudentGroups = useMemo(() => {
+    return groupedStudentReports.filter((group) => {
+      if (studentCompanyCountFilter === "all") return true;
+      if (studentCompanyCountFilter === "4plus") return group.company_count >= 4;
+      return group.company_count === Number(studentCompanyCountFilter);
+    });
+  }, [groupedStudentReports, studentCompanyCountFilter]);
+
+  const selectedVisibleCount = studentFeedbackMode === "student"
+    ? filteredStudentGroups.filter((group) => selectedStudentIds.includes(group.student_id)).length
+    : studentReports.filter((report) => selectedStudentReports.includes(report.id)).length;
+  const allVisibleSelected = studentFeedbackMode === "student"
+    ? filteredStudentGroups.length > 0 && selectedVisibleCount === filteredStudentGroups.length
+    : studentReports.length > 0 && selectedVisibleCount === studentReports.length;
   function toggleVisibleStudentSelection(checked) {
+    if (studentFeedbackMode === "student") {
+      const visibleIds = filteredStudentGroups.map((group) => group.student_id);
+      setSelectedStudentIds((current) => checked
+        ? [...new Set([...current, ...visibleIds])]
+        : current.filter((id) => !visibleIds.includes(id)));
+      return;
+    }
     const visibleIds = studentReports.map((report) => report.id);
     setSelectedStudentReports((current) => checked
       ? [...new Set([...current, ...visibleIds])]
@@ -2036,9 +2108,43 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
     setStudentDownloadStep("idle");
     setStudentDownloadError("");
     setSelectedStudentReports([]);
+    setSelectedStudentIds([]);
+  }
+  function openStudentRowDownload(report, preferredScope = "single") {
+    const studentId = report?.student_id ?? report?.student?.id ?? report?.student?._id ?? null;
+    if (!report || !studentId) return;
+    const studentReportsForThisStudent = reports.filter((candidate) => {
+      const candidateStudentId = candidate.student_id ?? candidate.student?.id ?? candidate.student?._id ?? null;
+      return candidateStudentId != null && String(candidateStudentId) === String(studentId);
+    });
+    const total = studentReportsForThisStudent.length;
+    setStudentRowDialog({
+      report,
+      studentId,
+      studentName: report.student?.name || "Student",
+      total,
+      reports: studentReportsForThisStudent,
+    });
+    setStudentRowScope(preferredScope === "student" || total > 1 ? "student" : "single");
+    setStudentRowFormat("combined");
+  }
+  function openStudentGroupDownload(group) {
+    if (!group?.reports?.length) return;
+    const firstReport = group.reports[0];
+    setStudentRowDialog({
+      report: firstReport,
+      studentId: group.student_id,
+      studentName: group.student_name || "Student",
+      total: group.reports.length,
+      reports: group.reports,
+    });
+    setStudentRowScope("student");
+    setStudentRowFormat("combined");
   }
   function continueStudentDownload() {
-    const visibleSelected = studentReports.filter((report) => selectedStudentReports.includes(report.id));
+    const visibleSelected = studentFeedbackMode === "student"
+      ? filteredStudentGroups.filter((group) => selectedStudentIds.includes(group.student_id))
+      : studentReports.filter((report) => selectedStudentReports.includes(report.id));
     if (!visibleSelected.length) return setStudentDownloadError("Please select at least one student to continue.");
     setStudentDownloadError("");
     setStudentDownloadStep("format");
@@ -2179,10 +2285,16 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
             </button>
           </div>
           {feedbackView === "student" ? (
-            <label className="student-search rep-toolbar-search">
-              <span>Search</span>
-              <input value={studentSearch} onChange={(event) => setStudentSearch(event.target.value)} placeholder="Search student, company, or role..." />
-            </label>
+            <>
+              <div className="rep-view-tabs student-subview-tabs" role="tablist" aria-label="Student feedback subview">
+                <button type="button" role="tab" aria-selected={studentFeedbackMode === "interview"} className={`rep-view-tab ${studentFeedbackMode === "interview" ? "on" : ""}`} onClick={() => setStudentFeedbackMode("interview")}>Interview View</button>
+                <button type="button" role="tab" aria-selected={studentFeedbackMode === "student"} className={`rep-view-tab ${studentFeedbackMode === "student" ? "on" : ""}`} onClick={() => setStudentFeedbackMode("student")}>Student View</button>
+              </div>
+              <label className="student-search rep-toolbar-search">
+                <span>Search</span>
+                <input value={studentSearch} onChange={(event) => setStudentSearch(event.target.value)} placeholder="Search student, company, or role..." />
+              </label>
+            </>
           ) : null}
           <div className="rep-toolbar-controls">
             <label className="student-company-select">
@@ -2193,13 +2305,27 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
               </select>
             </label>
             {feedbackView === "student" ? (
-              <label className="student-company-select">
-                <span>Company</span>
-                <select value={studentCompanyFilter} onChange={(event) => { setStudentCompanyFilter(event.target.value); setOpenStudentId(null); }}>
-                  <option value="all">All companies</option>
-                  {studentCompanies.map((company) => <option key={company} value={company}>{company}</option>)}
-                </select>
-              </label>
+              <>
+                <label className="student-company-select">
+                  <span>Company</span>
+                  <select value={studentCompanyFilter} onChange={(event) => { setStudentCompanyFilter(event.target.value); setOpenStudentId(null); }}>
+                    <option value="all">All companies</option>
+                    {studentCompanies.map((company) => <option key={company} value={company}>{company}</option>)}
+                  </select>
+                </label>
+                {studentFeedbackMode === "student" ? (
+                  <label className="student-company-select">
+                    <span>Companies attended</span>
+                    <select value={studentCompanyCountFilter} onChange={(event) => setStudentCompanyCountFilter(event.target.value)}>
+                      <option value="all">All</option>
+                      <option value="1">1 company</option>
+                      <option value="2">2 companies</option>
+                      <option value="3">3 companies</option>
+                      <option value="4plus">4+ companies</option>
+                    </select>
+                  </label>
+                ) : null}
+              </>
             ) : (
               <label className="student-company-select">
                 <span>Company</span>
@@ -2221,7 +2347,11 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
         <section className="student-feedback-view">
           <div className="student-feedback-heading">
             <p className="eyebrow">All Student Feedback</p>
-            <h2>{studentReports.length} {studentReports.length === 1 ? "interview report" : "interview reports"}</h2>
+            <h2>
+              {studentFeedbackMode === "student"
+                ? `${filteredStudentGroups.length} unique student${filteredStudentGroups.length === 1 ? "" : "s"}`
+                : `${studentReports.length} ${studentReports.length === 1 ? "interview report" : "interview reports"}`}
+            </h2>
             {studentReports.length !== reports.length ? <p className="ov-sub">Filtered from {reports.length} available reports</p> : null}
           </div>
           {!studentReports.length ? (
@@ -2231,47 +2361,135 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
               <div className="student-export-actions">
                 {studentDownloadStep === "select" ? <><strong>Select student feedback to download</strong><button type="button" onClick={exitStudentDownloadMode}>Cancel</button><button type="button" className="company-download-trigger" onClick={continueStudentDownload}>Continue</button></> : null}
                 {studentDownloadError ? <span className="company-export-error">{studentDownloadError}</span> : null}
-                <label className="student-select-all" style={{ display: studentDownloadStep === "select" ? undefined : "none" }}><input type="checkbox" checked={allVisibleSelected} onChange={(event) => toggleVisibleStudentSelection(event.target.checked)} /> Select all matching students</label>
+                <label className="student-select-all" style={{ display: studentDownloadStep === "select" ? undefined : "none" }}><input type="checkbox" checked={allVisibleSelected} onChange={(event) => toggleVisibleStudentSelection(event.target.checked)} /> Select all matching {studentFeedbackMode === "student" ? "students" : "students"}</label>
                 <span style={{ display: studentDownloadStep === "select" ? undefined : "none" }}>{selectedVisibleCount} student{selectedVisibleCount === 1 ? "" : "s"} selected</span>
                 <details className="student-export-menu" style={{ display: "none" }}>
                   <summary>{studentExporting ? "Preparing export…" : "Download all student feedback"}</summary>
                   <div>
-                    <button type="button" disabled={!!studentExporting} onClick={() => exportStudentFeedback(studentReports.map((report) => report.id), "combined", "all")}>Combined DOCX</button>
-                    <button type="button" disabled={!!studentExporting} onClick={() => exportStudentFeedback(studentReports.map((report) => report.id), "separate", "all")}>Separate DOCX files</button>
-                    <button type="button" disabled={!!studentExporting} onClick={() => exportStudentFeedback(studentReports.map((report) => report.id), "both", "all")}>Combined + Separate</button>
+                    <button type="button" disabled={!!studentExporting} onClick={() => {
+                      const allReports = studentReports;
+                      const studentName = allReports[0]?.student?.name || "Student";
+                      const companyNames = [...new Set(allReports.map((report) => report.company || "Company").filter(Boolean))];
+                      exportStudentFeedback(allReports.map((report) => report.id), "combined", "student", studentName, companyNames);
+                    }}>Combined DOCX</button>
+                    <button type="button" disabled={!!studentExporting} onClick={() => {
+                      const allReports = studentReports;
+                      const studentName = allReports[0]?.student?.name || "Student";
+                      const companyNames = [...new Set(allReports.map((report) => report.company || "Company").filter(Boolean))];
+                      exportStudentFeedback(allReports.map((report) => report.id), "separate", "student", studentName, companyNames);
+                    }}>Separate DOCX files</button>
+                    <button type="button" disabled={!!studentExporting} onClick={() => {
+                      const allReports = studentReports;
+                      const studentName = allReports[0]?.student?.name || "Student";
+                      const companyNames = [...new Set(allReports.map((report) => report.company || "Company").filter(Boolean))];
+                      exportStudentFeedback(allReports.map((report) => report.id), "both", "student", studentName, companyNames);
+                    }}>Combined + Separate</button>
                   </div>
                 </details>
-                {selectedStudentReports.length ? (
+                {(studentFeedbackMode === "interview" ? selectedStudentReports : filteredStudentGroups.filter((group) => selectedStudentIds.includes(group.student_id))).length ? (
                   <details className="student-export-menu" style={{ display: "none" }}>
                     <summary>{studentExporting ? `Generating ${studentExporting.total} document${studentExporting.total === 1 ? "" : "s"}…` : "Download selected"}</summary>
                     <div>
-                      <button type="button" disabled={!!studentExporting} onClick={() => exportStudentFeedback(selectedStudentReports, "combined")}>Combined DOCX</button>
-                      <button type="button" disabled={!!studentExporting} onClick={() => exportStudentFeedback(selectedStudentReports, "separate")}>Separate DOCX files</button>
-                      <button type="button" disabled={!!studentExporting} onClick={() => exportStudentFeedback(selectedStudentReports, "both")}>Combined + Separate</button>
+                      <button type="button" disabled={!!studentExporting} onClick={() => {
+                        const selectedReportIds = studentFeedbackMode === "student"
+                          ? filteredStudentGroups.filter((group) => selectedStudentIds.includes(group.student_id)).flatMap((group) => group.reports.map((report) => report.id))
+                          : selectedStudentReports;
+                        const selectedReports = studentReports.filter((report) => selectedReportIds.includes(report.id));
+                        const studentName = selectedReports[0]?.student?.name || "Student";
+                        const companyNames = [...new Set(selectedReports.map((report) => report.company || "Company").filter(Boolean))];
+                        exportStudentFeedback(selectedReportIds, "combined", "selected", studentName, companyNames);
+                      }}>Combined DOCX</button>
+                      <button type="button" disabled={!!studentExporting} onClick={() => {
+                        const selectedReportIds = studentFeedbackMode === "student"
+                          ? filteredStudentGroups.filter((group) => selectedStudentIds.includes(group.student_id)).flatMap((group) => group.reports.map((report) => report.id))
+                          : selectedStudentReports;
+                        const selectedReports = studentReports.filter((report) => selectedReportIds.includes(report.id));
+                        const studentName = selectedReports[0]?.student?.name || "Student";
+                        const companyNames = [...new Set(selectedReports.map((report) => report.company || "Company").filter(Boolean))];
+                        exportStudentFeedback(selectedReportIds, "separate", "selected", studentName, companyNames);
+                      }}>Separate DOCX files</button>
+                      <button type="button" disabled={!!studentExporting} onClick={() => {
+                        const selectedReportIds = studentFeedbackMode === "student"
+                          ? filteredStudentGroups.filter((group) => selectedStudentIds.includes(group.student_id)).flatMap((group) => group.reports.map((report) => report.id))
+                          : selectedStudentReports;
+                        const selectedReports = studentReports.filter((report) => selectedReportIds.includes(report.id));
+                        const studentName = selectedReports[0]?.student?.name || "Student";
+                        const companyNames = [...new Set(selectedReports.map((report) => report.company || "Company").filter(Boolean))];
+                        exportStudentFeedback(selectedReportIds, "both", "selected", studentName, companyNames);
+                      }}>Combined + Separate</button>
                     </div>
                   </details>
                 ) : null}
               </div>
               <div className="rep-list" data-scroll-key="student-reports">
-                {studentReports.map((report) => (
-                  <StudentFeedbackRow
-                    key={report.id}
-                    report={report}
-                    selected={selectedStudentReports.includes(report.id)}
-                    showSelection={studentDownloadStep === "select"}
-                    open={openStudentId === report.id}
-                    onSelect={(checked) => setSelectedStudentReports((current) => checked ? [...new Set([...current, report.id])] : current.filter((id) => id !== report.id))}
-                    onToggle={() => setOpenStudentId(openStudentId === report.id ? null : report.id)}
-                    downloading={!!studentExporting}
-                    onDownload={() => exportStudentFeedback(
-                      [report.id],
-                      "combined",
-                      "selected",
-                      `${(report.student?.name || "Student").replace(/[^a-z0-9]+/gi, "_").replace(/^_+|_+$/g, "") || "Student"}_Interview_Feedback.docx`,
-                    )}
-                    onCompanyDownload={() => downloadCompanyFeedback({ companyId: report.company_id, company: report.company })}
-                  />
-                ))}
+                {studentFeedbackMode === "student" ? (
+                  filteredStudentGroups.map((group) => {
+                    const expanded = openStudentId === group.student_id;
+                    const selected = selectedStudentIds.includes(group.student_id);
+                    return (
+                      <div key={group.student_id} className={`rep-item student-feedback-row ${expanded ? "open" : ""}`}>
+                        <div className="rep-row">
+                          {studentDownloadStep === "select" ? <label className="student-report-check" onClick={(event) => event.stopPropagation()}>
+                            <input type="checkbox" checked={selected} onChange={(event) => setSelectedStudentIds((current) => event.target.checked ? [...new Set([...current, group.student_id])] : current.filter((id) => id !== group.student_id))} aria-label={`Select ${group.student_name}`} />
+                          </label> : null}
+                          <span className="rep-main">
+                            <strong>{group.student_name || "Student"}</strong>
+                            <span className="rep-sub">[{group.company_count} companies] · {group.interview_count} {group.interview_count === 1 ? "interview" : "interviews"}</span>
+                          </span>
+                          {group.interview_count > 1 ? (
+                            <button type="button" className="rep-view-feedback" onClick={() => setOpenStudentId(expanded ? null : group.student_id)}>
+                              {expanded ? "Collapse" : "Expand"}
+                            </button>
+                          ) : null}
+                          <button type="button" className="rep-view-feedback" onClick={() => setOpenStudentId(expanded ? null : group.student_id)}>
+                            {expanded ? "Hide" : "View"}
+                          </button>
+                          <button type="button" className="rep-student-download" disabled={!!studentExporting} onClick={() => openStudentGroupDownload(group)}>
+                            {studentExporting ? <Loader2 className="spin" size={14} /> : <Download size={14} />} DOCX
+                          </button>
+                        </div>
+                        {expanded ? (
+                          <div className="rep-body">
+                            {group.reports.map((report) => (
+                              <div key={report.id} className="rep-item student-feedback-row nested-student-row">
+                                <div className="rep-row">
+                                  <span className="rep-main">
+                                    <strong>{report.company || "Company"}</strong>
+                                    <span className="rep-sub">{report.role || "—"}{report.overall?.score != null ? ` · ${report.overall.score}/10` : ""}{report.visible_to_student ? " · Published" : " · Pending"}</span>
+                                  </span>
+                                  <button type="button" className="rep-view-feedback" onClick={() => setOpenStudentId(group.student_id)}>
+                                    View
+                                  </button>
+                                  <button type="button" className="rep-student-download" disabled={!!studentExporting} onClick={() => openStudentRowDownload(report)}>
+                                    {studentExporting ? <Loader2 className="spin" size={14} /> : <Download size={14} />} DOCX
+                                  </button>
+                                  <button type="button" className="rep-student-download" disabled={!!studentExporting || !report.company_id} onClick={() => downloadCompanyFeedback({ companyId: report.company_id, company: report.company })}>
+                                    <Building2 size={14} /> Company Feedback
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })
+                ) : (
+                  studentReports.map((report) => (
+                    <StudentFeedbackRow
+                      key={report.id}
+                      report={report}
+                      selected={selectedStudentReports.includes(report.id)}
+                      showSelection={studentDownloadStep === "select"}
+                      open={openStudentId === report.id}
+                      onSelect={(checked) => setSelectedStudentReports((current) => checked ? [...new Set([...current, report.id])] : current.filter((id) => id !== report.id))}
+                      onToggle={() => setOpenStudentId(openStudentId === report.id ? null : report.id)}
+                      downloading={!!studentExporting}
+                      onDownload={() => openStudentRowDownload(report)}
+                      onCompanyDownload={() => downloadCompanyFeedback({ companyId: report.company_id, company: report.company })}
+                    />
+                  ))
+                )}
               </div>
             </>
           )}
@@ -2348,7 +2566,58 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
       {studentDownloadStep === "format" || studentDownloadStep === "confirm" ? (
         <div className="company-export-backdrop" role="presentation">
           <section className="company-export-dialog" role="dialog" aria-modal="true">
-            {studentDownloadStep === "format" ? <><h2>Download Student Feedback</h2><p>{selectedVisibleCount} student{selectedVisibleCount === 1 ? "" : "s"} selected</p><h3>Download format</h3><div className="feedback-format-options"><FeedbackFormatOption value="combined" selected={studentDownloadFormat === "combined"} onChange={setStudentDownloadFormat} title="Combined DOCX" description="One document containing all selected students" /><FeedbackFormatOption value="separate" selected={studentDownloadFormat === "separate"} onChange={setStudentDownloadFormat} title="Separate DOCX files" description="One document for each selected student" /><FeedbackFormatOption value="both" selected={studentDownloadFormat === "both"} onChange={setStudentDownloadFormat} title="Combined + Separate" description="One combined document + individual student documents" /></div><div className="company-dialog-actions"><button type="button" onClick={() => setStudentDownloadStep("select")}>Back</button><button type="button" className="company-download-trigger" onClick={() => setStudentDownloadStep("confirm")}>Continue</button></div></> : <><h2>Confirm Download</h2><p>You are about to download {selectedVisibleCount} student{selectedVisibleCount === 1 ? "" : "s"}.</p><p><strong>Format:</strong> {studentDownloadFormat === "combined" ? "Combined DOCX" : studentDownloadFormat === "separate" ? "Separate DOCX files" : "Combined + Separate"}</p><div className="company-dialog-actions"><button type="button" onClick={exitStudentDownloadMode}>Cancel</button><button type="button" className="company-download-trigger" onClick={() => exportStudentFeedback(selectedStudentReports, studentDownloadFormat, "selected", "", exitStudentDownloadMode)}>Confirm &amp; Download</button></div></>}
+            {studentDownloadStep === "format" ? <><h2>Download Student Feedback</h2><p>{selectedVisibleCount} student{selectedVisibleCount === 1 ? "" : "s"} selected</p><h3>Download format</h3><div className="feedback-format-options"><FeedbackFormatOption value="combined" selected={studentDownloadFormat === "combined"} onChange={setStudentDownloadFormat} title="Combined DOCX" description="One document containing all selected students" /><FeedbackFormatOption value="separate" selected={studentDownloadFormat === "separate"} onChange={setStudentDownloadFormat} title="Separate DOCX files" description="One document for each selected student" /><FeedbackFormatOption value="both" selected={studentDownloadFormat === "both"} onChange={setStudentDownloadFormat} title="Combined + Separate" description="One combined document + individual student documents" /></div><div className="company-dialog-actions"><button type="button" onClick={() => setStudentDownloadStep("select")}>Back</button><button type="button" className="company-download-trigger" onClick={() => setStudentDownloadStep("confirm")}>Continue</button></div></> : <><h2>Confirm Download</h2><p>You are about to download {selectedVisibleCount} student{selectedVisibleCount === 1 ? "" : "s"}.</p><p><strong>Format:</strong> {studentDownloadFormat === "combined" ? "Combined DOCX" : studentDownloadFormat === "separate" ? "Separate DOCX files" : "Combined + Separate"}</p><div className="company-dialog-actions"><button type="button" onClick={exitStudentDownloadMode}>Cancel</button><button type="button" className="company-download-trigger" onClick={() => { const selectedReports = studentReports.filter(r => selectedStudentReports.includes(r.id)); const studentName = selectedReports[0]?.student?.name || "Student"; const companyNames = [...new Set(selectedReports.map(r => r.company || "Company").filter(Boolean))]; exportStudentFeedback(selectedStudentReports, studentDownloadFormat, "selected", studentName, companyNames, exitStudentDownloadMode); }}>Confirm &amp; Download</button></div></>}
+          </section>
+        </div>
+      ) : null}
+      {studentRowDialog ? (
+        <div className="company-export-backdrop" role="presentation" onMouseDown={() => !studentExporting && setStudentRowDialog(null)}>
+          <section className="company-export-dialog" role="dialog" aria-modal="true" aria-labelledby="student-row-export-title" onMouseDown={(event) => event.stopPropagation()}>
+            <h2 id="student-row-export-title">Download Student Feedback</h2>
+            <p><strong>Student:</strong> {studentRowDialog.studentName}</p>
+            {studentRowDialog.total > 1 ? (
+              <>
+                <p>This student has {studentRowDialog.total} interview reports.</p>
+                <h3>What would you like to download?</h3>
+                <label><input type="radio" name="student-row-scope" checked={studentRowScope === "single"} onChange={() => setStudentRowScope("single")} /> This interview only</label>
+                {studentRowDialog.report.company ? <p className="ov-muted">{studentRowDialog.report.company}</p> : null}
+                <label><input type="radio" name="student-row-scope" checked={studentRowScope === "student"} onChange={() => setStudentRowScope("student")} /> Include all interviews for this student</label>
+                <p className="ov-muted">{studentRowDialog.total} interviews across {new Set(studentRowDialog.reports.map((report) => report.company || "Company")).size} companies</p>
+              </>
+            ) : (
+              <p>This student has 1 interview report.</p>
+            )}
+            <h3>Format</h3>
+            {studentRowScope === "single" ? (
+              <label><input type="radio" checked readOnly /> DOCX</label>
+            ) : (
+              <>
+                <label><input type="radio" name="student-row-format" checked={studentRowFormat === "combined"} onChange={() => setStudentRowFormat("combined")} /> Combined DOCX</label>
+                <label><input type="radio" name="student-row-format" checked={studentRowFormat === "separate"} onChange={() => setStudentRowFormat("separate")} /> Separate DOCX files</label>
+                <label><input type="radio" name="student-row-format" checked={studentRowFormat === "both"} onChange={() => setStudentRowFormat("both")} /> Combined + Separate</label>
+              </>
+            )}
+            <div className="company-dialog-actions">
+              <button type="button" onClick={() => setStudentRowDialog(null)}>Cancel</button>
+              <button type="button" className="company-download-trigger" onClick={() => {
+                const scopeForExport = studentRowScope === "student" ? "student" : "single";
+                const reportIds = scopeForExport === "student" ? studentRowDialog.reports.map((report) => report.id) : [studentRowDialog.report.id];
+                const mode = scopeForExport === "single" ? "combined" : studentRowFormat;
+                const studentName = studentRowDialog.studentName || "Student";
+                const companyNames = scopeForExport === "student"
+                  ? [...new Set(studentRowDialog.reports.map((report) => report.company || "Company").filter(Boolean))]
+                  : [studentRowDialog.report.company || "Company"];
+                exportStudentFeedback(
+                  reportIds,
+                  mode,
+                  scopeForExport,
+                  studentName,
+                  companyNames,
+                  () => setStudentRowDialog(null),
+                  studentRowDialog.studentId,
+                );
+              }}>Confirm &amp; Download</button>
+            </div>
           </section>
         </div>
       ) : null}
@@ -5628,3 +5897,4 @@ function Metric({ icon, label, value, onClick }) {
 }
 
 createRoot(document.getElementById("root")).render(<App />);
+
