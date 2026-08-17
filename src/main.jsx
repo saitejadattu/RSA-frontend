@@ -1898,19 +1898,32 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
     }
   }
 
-  async function exportStudentFeedback(reportIds, mode, scope = "selected", studentName = "", companyNames = [], onDone, studentId = null) {
+  async function exportStudentFeedback(reportIds, mode, scope = "selected", studentName = "", companyNames = [], onDone, studentId = null, studentIds = []) {
     if (!reportIds.length || studentExporting) return;
+    const request = { report_ids: reportIds, student_ids: studentIds, mode, scope, student_id: studentId };
+    const exportErrorMessage = "Unable to generate the selected feedback. Please try again.";
+    let alreadyLogged = false;
     setStudentExporting({ mode, total: reportIds.length });
     setError("");
+    setStudentDownloadError("");
     try {
       const response = await fetch(`${API_BASE_URL}/admin/reports/student-feedback/export`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${adminToken}` },
-        body: JSON.stringify({ report_ids: reportIds, mode, scope, student_id: studentId }),
+        body: JSON.stringify(request),
       });
       if (!response.ok) {
         const data = await response.json().catch(() => null);
-        throw new Error(data?.detail || "Unable to export student feedback");
+        alreadyLogged = true;
+        console.error("EXPORT ERROR", {
+          student_ids: studentIds.length ? studentIds : (studentId ? [studentId] : []),
+          format: mode,
+          request,
+          httpStatus: response.status,
+          backendResponse: data,
+          error: data?.detail || exportErrorMessage,
+        });
+        throw new Error(exportErrorMessage);
       }
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);
@@ -1924,7 +1937,18 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
       URL.revokeObjectURL(url);
       onDone?.();
     } catch (err) {
-      setError(err.message);
+      if (!alreadyLogged) {
+        console.error("EXPORT ERROR", {
+          student_ids: studentIds.length ? studentIds : (studentId ? [studentId] : []),
+          format: mode,
+          request,
+          httpStatus: err?.status ?? "network",
+          backendResponse: null,
+          error: err?.message || String(err),
+        });
+      }
+      setError(exportErrorMessage);
+      setStudentDownloadError(exportErrorMessage);
     } finally {
       setStudentExporting(null);
     }
@@ -2391,31 +2415,40 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
                     <summary>{studentExporting ? `Generating ${studentExporting.total} document${studentExporting.total === 1 ? "" : "s"}…` : "Download selected"}</summary>
                     <div>
                       <button type="button" disabled={!!studentExporting} onClick={() => {
+                        const selectedGroups = studentFeedbackMode === "student"
+                          ? filteredStudentGroups.filter((group) => selectedStudentIds.includes(group.student_id))
+                          : [];
                         const selectedReportIds = studentFeedbackMode === "student"
-                          ? filteredStudentGroups.filter((group) => selectedStudentIds.includes(group.student_id)).flatMap((group) => group.reports.map((report) => report.id))
+                          ? selectedGroups.flatMap((group) => group.reports.map((report) => report.id))
                           : selectedStudentReports;
                         const selectedReports = studentReports.filter((report) => selectedReportIds.includes(report.id));
                         const studentName = selectedReports[0]?.student?.name || "Student";
                         const companyNames = [...new Set(selectedReports.map((report) => report.company || "Company").filter(Boolean))];
-                        exportStudentFeedback(selectedReportIds, "combined", "selected", studentName, companyNames);
+                        exportStudentFeedback(selectedReportIds, "combined", "selected", studentName, companyNames, undefined, null, selectedGroups.map((group) => group.student_id));
                       }}>Combined DOCX</button>
                       <button type="button" disabled={!!studentExporting} onClick={() => {
+                        const selectedGroups = studentFeedbackMode === "student"
+                          ? filteredStudentGroups.filter((group) => selectedStudentIds.includes(group.student_id))
+                          : [];
                         const selectedReportIds = studentFeedbackMode === "student"
-                          ? filteredStudentGroups.filter((group) => selectedStudentIds.includes(group.student_id)).flatMap((group) => group.reports.map((report) => report.id))
+                          ? selectedGroups.flatMap((group) => group.reports.map((report) => report.id))
                           : selectedStudentReports;
                         const selectedReports = studentReports.filter((report) => selectedReportIds.includes(report.id));
                         const studentName = selectedReports[0]?.student?.name || "Student";
                         const companyNames = [...new Set(selectedReports.map((report) => report.company || "Company").filter(Boolean))];
-                        exportStudentFeedback(selectedReportIds, "separate", "selected", studentName, companyNames);
+                        exportStudentFeedback(selectedReportIds, "separate", "selected", studentName, companyNames, undefined, null, selectedGroups.map((group) => group.student_id));
                       }}>Separate DOCX files</button>
                       <button type="button" disabled={!!studentExporting} onClick={() => {
+                        const selectedGroups = studentFeedbackMode === "student"
+                          ? filteredStudentGroups.filter((group) => selectedStudentIds.includes(group.student_id))
+                          : [];
                         const selectedReportIds = studentFeedbackMode === "student"
-                          ? filteredStudentGroups.filter((group) => selectedStudentIds.includes(group.student_id)).flatMap((group) => group.reports.map((report) => report.id))
+                          ? selectedGroups.flatMap((group) => group.reports.map((report) => report.id))
                           : selectedStudentReports;
                         const selectedReports = studentReports.filter((report) => selectedReportIds.includes(report.id));
                         const studentName = selectedReports[0]?.student?.name || "Student";
                         const companyNames = [...new Set(selectedReports.map((report) => report.company || "Company").filter(Boolean))];
-                        exportStudentFeedback(selectedReportIds, "both", "selected", studentName, companyNames);
+                        exportStudentFeedback(selectedReportIds, "both", "selected", studentName, companyNames, undefined, null, selectedGroups.map((group) => group.student_id));
                       }}>Combined + Separate</button>
                     </div>
                   </details>
@@ -2566,7 +2599,14 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
       {studentDownloadStep === "format" || studentDownloadStep === "confirm" ? (
         <div className="company-export-backdrop" role="presentation">
           <section className="company-export-dialog" role="dialog" aria-modal="true">
-            {studentDownloadStep === "format" ? <><h2>Download Student Feedback</h2><p>{selectedVisibleCount} student{selectedVisibleCount === 1 ? "" : "s"} selected</p><h3>Download format</h3><div className="feedback-format-options"><FeedbackFormatOption value="combined" selected={studentDownloadFormat === "combined"} onChange={setStudentDownloadFormat} title="Combined DOCX" description="One document containing all selected students" /><FeedbackFormatOption value="separate" selected={studentDownloadFormat === "separate"} onChange={setStudentDownloadFormat} title="Separate DOCX files" description="One document for each selected student" /><FeedbackFormatOption value="both" selected={studentDownloadFormat === "both"} onChange={setStudentDownloadFormat} title="Combined + Separate" description="One combined document + individual student documents" /></div><div className="company-dialog-actions"><button type="button" onClick={() => setStudentDownloadStep("select")}>Back</button><button type="button" className="company-download-trigger" onClick={() => setStudentDownloadStep("confirm")}>Continue</button></div></> : <><h2>Confirm Download</h2><p>You are about to download {selectedVisibleCount} student{selectedVisibleCount === 1 ? "" : "s"}.</p><p><strong>Format:</strong> {studentDownloadFormat === "combined" ? "Combined DOCX" : studentDownloadFormat === "separate" ? "Separate DOCX files" : "Combined + Separate"}</p><div className="company-dialog-actions"><button type="button" onClick={exitStudentDownloadMode}>Cancel</button><button type="button" className="company-download-trigger" onClick={() => { const selectedReports = studentReports.filter(r => selectedStudentReports.includes(r.id)); const studentName = selectedReports[0]?.student?.name || "Student"; const companyNames = [...new Set(selectedReports.map(r => r.company || "Company").filter(Boolean))]; exportStudentFeedback(selectedStudentReports, studentDownloadFormat, "selected", studentName, companyNames, exitStudentDownloadMode); }}>Confirm &amp; Download</button></div></>}
+            {studentDownloadStep === "format" ? <><h2>Download Student Feedback</h2><p>{selectedVisibleCount} student{selectedVisibleCount === 1 ? "" : "s"} selected</p><h3>Download format</h3><div className="feedback-format-options"><FeedbackFormatOption value="combined" selected={studentDownloadFormat === "combined"} onChange={setStudentDownloadFormat} title="Combined DOCX" description="One document containing all selected students" /><FeedbackFormatOption value="separate" selected={studentDownloadFormat === "separate"} onChange={setStudentDownloadFormat} title="Separate DOCX files" description="One document for each selected student" /><FeedbackFormatOption value="both" selected={studentDownloadFormat === "both"} onChange={setStudentDownloadFormat} title="Combined + Separate" description="One combined document + individual student documents" /></div><div className="company-dialog-actions"><button type="button" onClick={() => setStudentDownloadStep("select")}>Back</button><button type="button" className="company-download-trigger" onClick={() => setStudentDownloadStep("confirm")}>Continue</button></div></> : <><h2>Confirm Download</h2><p>You are about to download {selectedVisibleCount} student{selectedVisibleCount === 1 ? "" : "s"}.</p><p><strong>Format:</strong> {studentDownloadFormat === "combined" ? "Combined DOCX" : studentDownloadFormat === "separate" ? "Separate DOCX files" : "Combined + Separate"}</p><div className="company-dialog-actions"><button type="button" onClick={exitStudentDownloadMode} disabled={!!studentExporting}>Cancel</button><button type="button" className="company-download-trigger" disabled={!!studentExporting} onClick={() => {
+              const selectedGroups = filteredStudentGroups.filter((group) => selectedStudentIds.includes(group.student_id));
+              const selectedReportIds = selectedGroups.flatMap((group) => group.reports.map((report) => report.id));
+              const selectedReports = studentReports.filter((report) => selectedReportIds.includes(report.id));
+              const studentName = selectedReports[0]?.student?.name || "Student";
+              const companyNames = [...new Set(selectedReports.map((report) => report.company || "Company").filter(Boolean))];
+              exportStudentFeedback(selectedReportIds, studentDownloadFormat, "selected", studentName, companyNames, exitStudentDownloadMode, null, selectedGroups.map((group) => group.student_id));
+            }}>Confirm &amp; Download</button></div></>}
           </section>
         </div>
       ) : null}
