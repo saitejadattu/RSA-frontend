@@ -1736,7 +1736,7 @@ function ReportRow({ report, open, onToggle, onPublish, busy }) {
   );
 }
 
-function StudentFeedbackRow({ report, open, onToggle, selected, onSelect, showSelection, onDownload, downloading }) {
+function StudentFeedbackRow({ report, open, onToggle, selected, onSelect, showSelection, onDownload, onCompanyDownload, downloading }) {
   return (
     <div className={`rep-item student-feedback-row ${open ? "open" : ""}`}>
       <div className="rep-row">
@@ -1759,9 +1759,21 @@ function StudentFeedbackRow({ report, open, onToggle, selected, onSelect, showSe
         <button type="button" className="rep-student-download" disabled={downloading} onClick={onDownload}>
           {downloading ? <Loader2 className="spin" size={14} /> : <Download size={14} />} DOCX
         </button>
+        <button type="button" className="rep-student-download" disabled={downloading || !report.company_id} onClick={onCompanyDownload}>
+          <Building2 size={14} /> Company Feedback
+        </button>
       </div>
       {open ? <div className="rep-body"><AdminInterviewReportCard report={report} /></div> : null}
     </div>
+  );
+}
+
+function FeedbackFormatOption({ value, selected, onChange, title, description }) {
+  return (
+    <label className={`feedback-format-option ${selected ? "selected" : ""}`}>
+      <input type="radio" value={value} checked={selected} onChange={() => onChange(value)} />
+      <span className="feedback-format-copy"><strong>{title}</strong><small>{description}</small></span>
+    </label>
   );
 }
 
@@ -2154,7 +2166,8 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
 
       {!loading && reports.length ? (
         <div className="rep-filters">
-          <div className="rep-subtabs" aria-label="Report status filter">
+          <div className="rep-toolbar-status" aria-label="Report status filter">
+            <span className="rep-filter-label">Status</span>
             <button type="button" className={`rep-chip ${filter === "all" ? "on" : ""}`} onClick={() => setFilter("all")}>
               All ({reports.length})
             </button>
@@ -2165,25 +2178,21 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
               Published ({reports.length - pendingReports})
             </button>
           </div>
-          {reportMonths.length ? (
-            <div className="rep-month-tabs" aria-label="Report month filter">
-              <span className="rep-filter-label">Month</span>
-              <button type="button" className={`rep-chip ${monthFilter === "all" ? "on" : ""}`} onClick={() => { setMonthFilter("all"); setOpenCompany(null); }}>
-                All months
-              </button>
-              {reportMonths.map((month) => (
-                <button key={month.key} type="button" className={`rep-chip ${monthFilter === month.key ? "on" : ""}`} onClick={() => { setMonthFilter(month.key); setOpenCompany(null); }}>
-                  {month.label} ({month.count})
-                </button>
-              ))}
-            </div>
-          ) : null}
           {feedbackView === "student" ? (
-            <div className="student-feedback-filters">
-              <label className="student-search">
-                <span>Search students</span>
-                <input value={studentSearch} onChange={(event) => setStudentSearch(event.target.value)} placeholder="Search candidate name, company, or role" />
-              </label>
+            <label className="student-search rep-toolbar-search">
+              <span>Search</span>
+              <input value={studentSearch} onChange={(event) => setStudentSearch(event.target.value)} placeholder="Search student, company, or role..." />
+            </label>
+          ) : null}
+          <div className="rep-toolbar-controls">
+            <label className="student-company-select">
+              <span>Month</span>
+              <select value={monthFilter} onChange={(event) => { setMonthFilter(event.target.value); setOpenCompany(null); }}>
+                <option value="all">All months</option>
+                {reportMonths.map((month) => <option key={month.key} value={month.key}>{month.label} ({month.count})</option>)}
+              </select>
+            </label>
+            {feedbackView === "student" ? (
               <label className="student-company-select">
                 <span>Company</span>
                 <select value={studentCompanyFilter} onChange={(event) => { setStudentCompanyFilter(event.target.value); setOpenStudentId(null); }}>
@@ -2191,9 +2200,7 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
                   {studentCompanies.map((company) => <option key={company} value={company}>{company}</option>)}
                 </select>
               </label>
-            </div>
-          ) : (
-            <div className="student-feedback-filters">
+            ) : (
               <label className="student-company-select">
                 <span>Company</span>
                 <select value={companyFilter} onChange={(event) => { setCompanyFilter(event.target.value); setOpenCompany(null); }}>
@@ -2201,8 +2208,10 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
                   {studentCompanies.map((company) => <option key={company} value={company}>{company}</option>)}
                 </select>
               </label>
-            </div>
-          )}
+            )}
+            {feedbackView === "student" && studentDownloadStep === "idle" ? <button type="button" className="company-download-trigger" onClick={() => setStudentDownloadStep("select")}>Download feedback</button> : null}
+            {feedbackView === "company" && companyDownloadStep === "idle" ? <button type="button" className="company-download-trigger" onClick={() => setCompanyDownloadStep("select")}>Download feedback</button> : null}
+          </div>
         </div>
       ) : null}
 
@@ -2220,7 +2229,7 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
           ) : (
             <>
               <div className="student-export-actions">
-                {studentDownloadStep === "idle" ? <button type="button" className="company-download-trigger" onClick={() => setStudentDownloadStep("select")}>Download feedback</button> : <><strong>Select student feedback to download</strong><button type="button" onClick={exitStudentDownloadMode}>Cancel</button><button type="button" className="company-download-trigger" onClick={continueStudentDownload}>Continue</button></>}
+                {studentDownloadStep === "select" ? <><strong>Select student feedback to download</strong><button type="button" onClick={exitStudentDownloadMode}>Cancel</button><button type="button" className="company-download-trigger" onClick={continueStudentDownload}>Continue</button></> : null}
                 {studentDownloadError ? <span className="company-export-error">{studentDownloadError}</span> : null}
                 <label className="student-select-all" style={{ display: studentDownloadStep === "select" ? undefined : "none" }}><input type="checkbox" checked={allVisibleSelected} onChange={(event) => toggleVisibleStudentSelection(event.target.checked)} /> Select all matching students</label>
                 <span style={{ display: studentDownloadStep === "select" ? undefined : "none" }}>{selectedVisibleCount} student{selectedVisibleCount === 1 ? "" : "s"} selected</span>
@@ -2260,6 +2269,7 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
                       "selected",
                       `${(report.student?.name || "Student").replace(/[^a-z0-9]+/gi, "_").replace(/^_+|_+$/g, "") || "Student"}_Interview_Feedback.docx`,
                     )}
+                    onCompanyDownload={() => downloadCompanyFeedback({ companyId: report.company_id, company: report.company })}
                   />
                 ))}
               </div>
@@ -2278,7 +2288,7 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
       ) : (
         <>
           <div className="company-export-toolbar">
-            {companyDownloadStep === "idle" ? <button type="button" className="company-download-trigger" disabled={!!companyExporting} onClick={() => setCompanyDownloadStep("select")}>{companyExporting ? "Preparing export…" : "Download feedback"}</button> : <><strong>Select company feedback to download</strong><label className="student-select-all"><input type="checkbox" checked={allMatchingCompaniesSelected} onChange={(event) => toggleMatchingCompanies(event.target.checked)} /> Select all matching companies</label><span>{selectedMatchingCompanyCount} compan{selectedMatchingCompanyCount === 1 ? "y" : "ies"} selected</span><button type="button" onClick={exitCompanyDownloadMode}>Cancel</button><button type="button" className="company-download-trigger" onClick={continueCompanyDownload}>Continue</button></>}
+            {companyDownloadStep === "select" ? <><strong>Select company feedback to download</strong><label className="student-select-all"><input type="checkbox" checked={allMatchingCompaniesSelected} onChange={(event) => toggleMatchingCompanies(event.target.checked)} /> Select all matching companies</label><span>{selectedMatchingCompanyCount} compan{selectedMatchingCompanyCount === 1 ? "y" : "ies"} selected</span><button type="button" onClick={exitCompanyDownloadMode}>Cancel</button><button type="button" className="company-download-trigger" onClick={continueCompanyDownload}>Continue</button></> : null}
             {companyDownloadError ? <span className="company-export-error">{companyDownloadError}</span> : null}
           </div>
           <div className="rep-list" data-scroll-key="reports">
@@ -2338,14 +2348,14 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
       {studentDownloadStep === "format" || studentDownloadStep === "confirm" ? (
         <div className="company-export-backdrop" role="presentation">
           <section className="company-export-dialog" role="dialog" aria-modal="true">
-            {studentDownloadStep === "format" ? <><h2>Download Student Feedback</h2><p>{selectedVisibleCount} student{selectedVisibleCount === 1 ? "" : "s"} selected</p><h3>Format</h3><label><input type="radio" checked={studentDownloadFormat === "combined"} onChange={() => setStudentDownloadFormat("combined")} /> Combined DOCX</label><label><input type="radio" checked={studentDownloadFormat === "separate"} onChange={() => setStudentDownloadFormat("separate")} /> Separate DOCX files</label><label><input type="radio" checked={studentDownloadFormat === "both"} onChange={() => setStudentDownloadFormat("both")} /> Combined + Separate</label><div className="company-dialog-actions"><button type="button" onClick={() => setStudentDownloadStep("select")}>Back</button><button type="button" className="company-download-trigger" onClick={() => setStudentDownloadStep("confirm")}>Continue</button></div></> : <><h2>Confirm Download</h2><p>You are about to download {selectedVisibleCount} student{selectedVisibleCount === 1 ? "" : "s"}.</p><p><strong>Format:</strong> {studentDownloadFormat === "combined" ? "Combined DOCX" : studentDownloadFormat === "separate" ? "Separate DOCX files" : "Combined + Separate"}</p><div className="company-dialog-actions"><button type="button" onClick={exitStudentDownloadMode}>Cancel</button><button type="button" className="company-download-trigger" onClick={() => exportStudentFeedback(selectedStudentReports, studentDownloadFormat, "selected", "", exitStudentDownloadMode)}>Confirm &amp; Download</button></div></>}
+            {studentDownloadStep === "format" ? <><h2>Download Student Feedback</h2><p>{selectedVisibleCount} student{selectedVisibleCount === 1 ? "" : "s"} selected</p><h3>Download format</h3><div className="feedback-format-options"><FeedbackFormatOption value="combined" selected={studentDownloadFormat === "combined"} onChange={setStudentDownloadFormat} title="Combined DOCX" description="One document containing all selected students" /><FeedbackFormatOption value="separate" selected={studentDownloadFormat === "separate"} onChange={setStudentDownloadFormat} title="Separate DOCX files" description="One document for each selected student" /><FeedbackFormatOption value="both" selected={studentDownloadFormat === "both"} onChange={setStudentDownloadFormat} title="Combined + Separate" description="One combined document + individual student documents" /></div><div className="company-dialog-actions"><button type="button" onClick={() => setStudentDownloadStep("select")}>Back</button><button type="button" className="company-download-trigger" onClick={() => setStudentDownloadStep("confirm")}>Continue</button></div></> : <><h2>Confirm Download</h2><p>You are about to download {selectedVisibleCount} student{selectedVisibleCount === 1 ? "" : "s"}.</p><p><strong>Format:</strong> {studentDownloadFormat === "combined" ? "Combined DOCX" : studentDownloadFormat === "separate" ? "Separate DOCX files" : "Combined + Separate"}</p><div className="company-dialog-actions"><button type="button" onClick={exitStudentDownloadMode}>Cancel</button><button type="button" className="company-download-trigger" onClick={() => exportStudentFeedback(selectedStudentReports, studentDownloadFormat, "selected", "", exitStudentDownloadMode)}>Confirm &amp; Download</button></div></>}
           </section>
         </div>
       ) : null}
       {companyDownloadStep === "format" || companyDownloadStep === "confirm" ? (
         <div className="company-export-backdrop" role="presentation">
           <section className="company-export-dialog" role="dialog" aria-modal="true">
-            {companyDownloadStep === "format" ? <><h2>Download Company Feedback</h2><p>{selectedMatchingCompanyCount} compan{selectedMatchingCompanyCount === 1 ? "y" : "ies"} selected</p><h3>Format</h3><label><input type="radio" checked={companyExportFormat === "combined"} onChange={() => setCompanyExportFormat("combined")} /> Combined DOCX</label><label><input type="radio" checked={companyExportFormat === "separate"} onChange={() => setCompanyExportFormat("separate")} /> Separate DOCX files</label><label><input type="radio" checked={companyExportFormat === "both"} onChange={() => setCompanyExportFormat("both")} /> Combined + Separate</label><div className="company-dialog-actions"><button type="button" onClick={() => setCompanyDownloadStep("select")}>Back</button><button type="button" className="company-download-trigger" onClick={() => setCompanyDownloadStep("confirm")}>Continue</button></div></> : <><h2>Confirm Download</h2><p>You are about to download {selectedMatchingCompanyCount} compan{selectedMatchingCompanyCount === 1 ? "y" : "ies"}.</p><p><strong>Format:</strong> {companyExportFormat === "combined" ? "Combined DOCX" : companyExportFormat === "separate" ? "Separate DOCX files" : "Combined + Separate"}</p><div className="company-dialog-actions"><button type="button" onClick={exitCompanyDownloadMode}>Cancel</button><button type="button" className="company-download-trigger" onClick={() => exportCompanyFeedback(reports.filter((report) => selectedCompanies.includes(report.company)).map((report) => report.id), companyExportFormat, exitCompanyDownloadMode)}>Confirm &amp; Download</button></div></>}
+            {companyDownloadStep === "format" ? <><h2>Download Company Feedback</h2><p>{selectedMatchingCompanyCount} compan{selectedMatchingCompanyCount === 1 ? "y" : "ies"} selected</p><h3>Download format</h3><div className="feedback-format-options"><FeedbackFormatOption value="combined" selected={companyExportFormat === "combined"} onChange={setCompanyExportFormat} title="Combined DOCX" description="One document containing all selected companies" /><FeedbackFormatOption value="separate" selected={companyExportFormat === "separate"} onChange={setCompanyExportFormat} title="Separate DOCX files" description="One document for each selected company" /><FeedbackFormatOption value="both" selected={companyExportFormat === "both"} onChange={setCompanyExportFormat} title="Combined + Separate" description="One combined document + individual company documents" /></div><div className="company-dialog-actions"><button type="button" onClick={() => setCompanyDownloadStep("select")}>Back</button><button type="button" className="company-download-trigger" onClick={() => setCompanyDownloadStep("confirm")}>Continue</button></div></> : <><h2>Confirm Download</h2><p>You are about to download {selectedMatchingCompanyCount} compan{selectedMatchingCompanyCount === 1 ? "y" : "ies"}.</p><p><strong>Format:</strong> {companyExportFormat === "combined" ? "Combined DOCX" : companyExportFormat === "separate" ? "Separate DOCX files" : "Combined + Separate"}</p><div className="company-dialog-actions"><button type="button" onClick={exitCompanyDownloadMode}>Cancel</button><button type="button" className="company-download-trigger" onClick={() => exportCompanyFeedback(reports.filter((report) => selectedCompanies.includes(report.company)).map((report) => report.id), companyExportFormat, exitCompanyDownloadMode)}>Confirm &amp; Download</button></div></>}
           </section>
         </div>
       ) : null}
