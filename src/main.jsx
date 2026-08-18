@@ -1721,7 +1721,7 @@ function ReportRow({ report, open, onToggle, onPublish, busy }) {
           <span className="rep-sub">{report.company || "Company"} · {report.role || "—"}{report.overall?.score != null ? ` · ${report.overall.score}/10` : ""}</span>
         </span>
         <span className={`vis-badge ${report.visible_to_student ? "on" : ""}`}>{report.visible_to_student ? "Shared" : "Pending"}</span>
-        <span className="rep-date">{formatDate(report.generated_at)}</span>
+        <span className="rep-date">{formatDate(report.interview_date || report.scheduled_at || report.generated_at)}</span>
         <button
           type="button"
           className={`rep-pub ${report.visible_to_student ? "unpub" : "pub"}`}
@@ -1752,7 +1752,7 @@ function StudentFeedbackRow({ report, open, onToggle, selected, onSelect, showSe
           </span>
         </span>
         <span className={`vis-badge ${report.visible_to_student ? "on" : ""}`}>{report.visible_to_student ? "Shared" : "Pending"}</span>
-        <span className="rep-date">{formatDate(report.generated_at)}</span>
+        <span className="rep-date">{formatDate(report.interview_date || report.scheduled_at || report.generated_at)}</span>
         <button type="button" className="rep-view-feedback" onClick={onToggle}>
           {open ? "Hide feedback" : "View feedback"}
         </button>
@@ -1788,7 +1788,7 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
   const [gen, setGen] = useState(null); // {done,total,current} while generating
   const [genOne, setGenOne] = useState(null); // session id being (re)generated on its own
   const [filter, setFilter] = useState("all"); // all | pending | published (report publish state)
-  const [monthFilter, setMonthFilter] = useState("all"); // all | YYYY-MM (report generation month)
+  const [monthFilter, setMonthFilter] = useState("all"); // all | YYYY-MM (interview date month)
   const [companyFilter, setCompanyFilter] = useState("all");
   const [feedbackView, setFeedbackView] = useState("company"); // company | student
   const [studentFeedbackMode, setStudentFeedbackMode] = useState("interview"); // interview | student
@@ -2027,28 +2027,61 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
 
   // UTC keeps the month assignment consistent for every admin near midnight.
   const monthKeyForReport = (report) => {
-    const value = report.generated_at || report.created_at;
+    const value =
+      report.interview_date ||
+      report.scheduled_at ||
+      report.started_at ||
+      report.meeting_date ||
+      report.generated_at ||
+      report.created_at;
     if (!value) return null;
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return null;
     return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
   };
 
+  const companyKeyForReport = (report) => {
+    const companyId = report.company_id ?? report.company?.id ?? report.company?._id ?? null;
+    if (companyId != null) return String(companyId);
+    const companyName = report.company || "Company";
+    return `name:${String(companyName)}`;
+  };
+
   const reportMonths = useMemo(() => {
-    const counts = new Map();
-    reports.forEach((report) => {
+    const byPublishState =
+      filter === "pending" ? reports.filter((r) => !r.visible_to_student)
+      : filter === "published" ? reports.filter((r) => r.visible_to_student)
+      : reports;
+
+    const monthCompanySets = new Map();
+    byPublishState.forEach((report) => {
       const key = monthKeyForReport(report);
-      if (key) counts.set(key, (counts.get(key) || 0) + 1);
+      if (!key) return;
+
+      const companyKey = companyKeyForReport(report);
+      const monthCompanies = monthCompanySets.get(key) || new Set();
+      monthCompanies.add(companyKey);
+      monthCompanySets.set(key, monthCompanies);
     });
-    return [...counts.entries()]
+
+    return [...monthCompanySets.entries()]
       .sort(([a], [b]) => b.localeCompare(a))
-      .map(([key, count]) => ({
+      .map(([key, companyKeys]) => ({
         key,
-        count,
+        count: companyKeys.size,
         label: new Intl.DateTimeFormat("en", { month: "short", year: "numeric", timeZone: "UTC" })
           .format(new Date(`${key}-01T00:00:00Z`)),
       }));
-  }, [reports]);
+  }, [filter, reports]);
+
+  const allMonthUniqueCompanyCount = useMemo(() => {
+    const byPublishState =
+      filter === "pending" ? reports.filter((r) => !r.visible_to_student)
+      : filter === "published" ? reports.filter((r) => r.visible_to_student)
+      : reports;
+
+    return new Set(byPublishState.map((report) => companyKeyForReport(report))).size;
+  }, [filter, reports]);
 
   const sharedFilteredReports = useMemo(() => {
     const byPublishState =
@@ -2324,7 +2357,7 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
             <label className="student-company-select">
               <span>Month</span>
               <select value={monthFilter} onChange={(event) => { setMonthFilter(event.target.value); setOpenCompany(null); }}>
-                <option value="all">All months</option>
+                <option value="all">All months ({allMonthUniqueCompanyCount})</option>
                 {reportMonths.map((month) => <option key={month.key} value={month.key}>{month.label} ({month.count})</option>)}
               </select>
             </label>
