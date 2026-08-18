@@ -1165,7 +1165,6 @@ function StudentDashboard({ student, token, onLogout, route = [], navigate = () 
       <section className="dashboard-main">
         <header className="topbar sd-topbar">
           <div>
-            <p className="eyebrow">Student dashboard</p>
             <h1>{greeting()}, {firstName} 👋</h1>
             <p className="sd-header-sub">{headerSub}</p>
           </div>
@@ -1817,6 +1816,22 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
   const [showPending, setShowPending] = useState(false); // reveal the pending-extractions list
   const [downloadingCompanyId, setDownloadingCompanyId] = useState(null);
 
+  function formatStudentUuid(value) {
+    if (!value) return "";
+    const text = String(value);
+    if (text.length <= 12) return text;
+    return `${text.slice(0, 6)}...${text.slice(-6)}`;
+  }
+
+  async function copyStudentUuid(value) {
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(String(value));
+    } catch (error) {
+      // Clipboards can fail in some contexts; the full UUID is still exposed in the tooltip.
+    }
+  }
+
   function load() {
     setLoading(true);
     setError("");
@@ -2116,11 +2131,15 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
         map.set(key, {
           student_id: key,
           student_name: report.student?.name || "Student",
+          student_phone: report.student?.phone || report.student?.mobile || "",
           reports: [],
           company_keys: new Set(),
         });
       }
       const group = map.get(key);
+      if (!group.student_phone) {
+        group.student_phone = report.student?.phone || report.student?.mobile || "";
+      }
       group.reports.push(report);
       const companyId = report.company_id ?? report.company?.id ?? report.company?._id ?? report.company ?? null;
       if (companyId != null) group.company_keys.add(String(companyId));
@@ -2128,6 +2147,7 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
     return [...map.values()].map((group) => ({
       student_id: group.student_id,
       student_name: group.student_name,
+      student_phone: group.student_phone || "",
       reports: group.reports,
       company_count: group.company_keys.size,
       interview_count: group.reports.length,
@@ -2500,7 +2520,21 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
                           </label> : null}
                           <span className="rep-main">
                             <strong>{group.student_name || "Student"}</strong>
-                            <span className="rep-sub">[{group.company_count} companies] · {group.interview_count} {group.interview_count === 1 ? "interview" : "interviews"}</span>
+                            <span className="rep-sub">
+                              {group.company_count} {group.company_count === 1 ? "company" : "companies"} · {group.interview_count} {group.interview_count === 1 ? "interview" : "interviews"}
+                              {group.student_phone ? ` · 📱 ${group.student_phone}` : ""}
+                              {group.student_id ? ` · ID: ` : ""}
+                              {group.student_id ? (
+                                <button
+                                  type="button"
+                                  className="rep-uuid-link"
+                                  title={group.student_id}
+                                  onClick={(event) => { event.stopPropagation(); void copyStudentUuid(group.student_id); }}
+                                >
+                                  {formatStudentUuid(group.student_id)}
+                                </button>
+                              ) : null}
+                            </span>
                           </span>
                           {group.interview_count > 1 ? (
                             <button type="button" className="rep-view-feedback" onClick={() => setOpenStudentId(expanded ? null : group.student_id)}>

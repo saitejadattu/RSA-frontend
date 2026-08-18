@@ -3660,6 +3660,12 @@ input:focus {
 .rep-main strong { font-size: 14px; font-weight: 600; color: #101828; }
 .rep-sub { font-size: 12.5px; color: #667085; overflow-wrap: anywhere; }
 .rep-date { flex: none; font-size: 12.5px; color: #98a2b3; white-space: nowrap; }
+.rep-uuid-link {
+  display: inline; border: none; background: transparent; padding: 0; margin: 0;
+  font: inherit; color: #0f766e; text-decoration: underline; text-underline-offset: 2px;
+  cursor: pointer;
+}
+.rep-uuid-link:hover { color: #0a5d56; }
 .rep-download {
   display: inline-flex;
   align-items: center;
