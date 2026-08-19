@@ -43,6 +43,7 @@ import {
   TriangleAlert,
   Upload,
   Wand2,
+  Pencil,
 } from "lucide-react";
 import "./styles.css";
 
@@ -865,7 +866,7 @@ function StudentReportsView({ reports, loading, focusId, onPractice = () => {} }
     <div className="sd-feedback">
       <div className="sd-view-head">
         <h2>Interview feedback</h2>
-        <p>Coaching notes from your real interviews — what went well, and what to fix before the next one.</p>
+        <p>Notes from your interviews — what went well, and what to fix before the next one.</p>
       </div>
 
       {loading ? (
@@ -922,6 +923,8 @@ function studentStatusInfo(app) {
   switch (app.student_outcome) {
     case "declined":
       return { key: "declined", label: "Not interested", cls: "muted" };
+    case "rejected":
+      return { key: "not_shortlisted", label: "Rejected", cls: "bad" };
     case "interviewing":
       return { key: "interviewing", label: "Interview in progress", cls: "warn" };
     case "interview_done":
@@ -1166,7 +1169,7 @@ function StudentDashboard({ student, token, onLogout, route = [], navigate = () 
         <header className="topbar sd-topbar">
           <div>
             <h1>{greeting()}, {firstName} 👋</h1>
-            <p className="sd-header-sub">{headerSub}</p>
+            {/* <p className="sd-header-sub">{headerSub}</p> */}
           </div>
           <div className="sd-profile-wrap">
             <button type="button" className="sd-profile-btn" onClick={() => setProfileOpen((v) => !v)}>
@@ -5532,6 +5535,9 @@ function OpportunityDetail({ detail, adminToken, opportunityId, onRefresh }) {
   const [searchStudent, setSearchStudent] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
   const [applicantsOpen, setApplicantsOpen] = useState(true);
+  const [confirmBulkReject, setConfirmBulkReject] = useState(false);
+  const [bulkRejecting, setBulkRejecting] = useState(false);
+  const [bulkRejectError, setBulkRejectError] = useState("");
 
   const o = detail.opportunity || {};
   const stats = detail.stats || {};
@@ -5554,6 +5560,35 @@ function OpportunityDetail({ detail, adminToken, opportunityId, onRefresh }) {
     const matchesStatus = filterStatus === "all" || String(applicant.status || "").toUpperCase() === filterStatus;
     return matchesSearch && matchesStatus;
   });
+
+  const remainingInterviewed = useMemo(() => {
+    return applicants.filter((applicant) => {
+      const s = String(applicant.status || applicant.current_status || "").toUpperCase();
+      const finalS = String(applicant.final_status || "").toUpperCase();
+      const isInterviewCompleted = ["INTERVIEW_COMPLETED", "INTERVIEW_DONE"].includes(s);
+      const hasFinalResult =
+        ["HIRED", "SELECTED", "REJECTED", "DROPPED"].includes(finalS) ||
+        ["SELECTED", "JOINED", "REJECTED", "DROPPED"].includes(s);
+      return isInterviewCompleted && !hasFinalResult;
+    });
+  }, [applicants]);
+
+  const handleBulkReject = async () => {
+    setBulkRejecting(true);
+    setBulkRejectError("");
+    try {
+      await apiRequest(`/admin/opportunities/${opportunityId}/mark-not-selected`, {
+        method: "POST",
+        adminToken,
+      });
+      setConfirmBulkReject(false);
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      setBulkRejectError(err.message || "Failed to mark candidates as Not Selected");
+    } finally {
+      setBulkRejecting(false);
+    }
+  };
 
   const keyFacts = [
     ["Role", o.role],
@@ -5687,6 +5722,97 @@ function OpportunityDetail({ detail, adminToken, opportunityId, onRefresh }) {
                     ))}
                   </select>
                 </div>
+                {remainingInterviewed.length > 0 && adminToken && (
+                  <button
+                    type="button"
+                    onClick={() => { setConfirmBulkReject(true); setBulkRejectError(""); }}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                      padding: "6px 12px",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      color: "#be123c",
+                      backgroundColor: "#fff1f2",
+                      border: "1px solid #fecdd3",
+                      borderRadius: 6,
+                      cursor: "pointer",
+                    }}
+                  >
+                    <XCircle size={15} />
+                    Mark remaining interviewed candidates as Not Selected ({remainingInterviewed.length})
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {confirmBulkReject && (
+            <div
+              style={{
+                position: "fixed",
+                inset: 0,
+                backgroundColor: "rgba(0, 0, 0, 0.4)",
+                display: "grid",
+                placeItems: "center",
+                zIndex: 1000,
+                padding: 16,
+              }}
+            >
+              <div
+                style={{
+                  background: "#ffffff",
+                  borderRadius: 8,
+                  padding: 24,
+                  maxWidth: 450,
+                  width: "100%",
+                  boxShadow: "0 10px 25px rgba(0, 0, 0, 0.2)",
+                }}
+              >
+                <h3 style={{ margin: "0 0 12px", fontSize: 18, color: "#1e293b" }}>Confirm Final Status Update</h3>
+                <p style={{ margin: "0 0 20px", fontSize: 14, color: "#475569", lineHeight: 1.5 }}>
+                  Mark {remainingInterviewed.length} remaining interviewed candidate{remainingInterviewed.length === 1 ? "" : "s"} as Not Selected?
+                </p>
+                {bulkRejectError && (
+                  <div style={{ color: "#e11d48", fontSize: 13, marginBottom: 16 }}>{bulkRejectError}</div>
+                )}
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+                  <button
+                    type="button"
+                    onClick={() => { setConfirmBulkReject(false); setBulkRejectError(""); }}
+                    disabled={bulkRejecting}
+                    style={{
+                      padding: "8px 16px",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      borderRadius: 6,
+                      border: "1px solid #cbd5e1",
+                      background: "#ffffff",
+                      color: "#475569",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleBulkReject}
+                    disabled={bulkRejecting}
+                    style={{
+                      padding: "8px 16px",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      borderRadius: 6,
+                      border: "none",
+                      background: "#e11d48",
+                      color: "#ffffff",
+                      cursor: "pointer",
+                    }}
+                  >
+                    {bulkRejecting ? "Updating..." : "Confirm"}
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -5701,7 +5827,12 @@ function OpportunityDetail({ detail, adminToken, opportunityId, onRefresh }) {
                   <span>Links</span>
                 </div>
                 {filteredApplicants.map((applicant) => (
-                  <ApplicantRow key={applicant.id} application={applicant} />
+                  <ApplicantRow
+                    key={applicant.id || applicant._id}
+                    application={applicant}
+                    adminToken={adminToken}
+                    onUpdated={onRefresh}
+                  />
                 ))}
               </div>
             ) : (
@@ -5726,13 +5857,49 @@ function OpportunityDetail({ detail, adminToken, opportunityId, onRefresh }) {
   );
 }
 
-function ApplicantRow({ application }) {
+function ApplicantRow({ application, adminToken, onUpdated }) {
   const student = application.student || {};
+  const [editing, setEditing] = useState(false);
+  const [selectedStatus, setSelectedStatus] = useState(
+    application.status || application.current_status || "APPLIED"
+  );
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const currentStatus = String(application.status || application.current_status || "").toUpperCase();
+
   const links = [
     ["Resume", application.resume_link],
     ["Project", application.project_link],
     ["GitHub", application.github_link],
   ].filter(([, href]) => Boolean(href));
+
+  const handleSaveStatus = async () => {
+    if (!selectedStatus || selectedStatus === currentStatus) {
+      setEditing(false);
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      const appId = application.id || application._id;
+      await apiRequest(`/applications/${appId}/status`, {
+        method: "POST",
+        body: {
+          new_status: selectedStatus,
+          reason: "Manual status update by admin",
+          source: "manual",
+        },
+        adminToken,
+      });
+      setEditing(false);
+      if (onUpdated) onUpdated();
+    } catch (err) {
+      setError(err.message || "Failed to update status");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div className="admin-row applicants-row">
@@ -5741,12 +5908,68 @@ function ApplicantRow({ application }) {
         <span>{student.phone || student.email || "Contact not added"}</span>
       </div>
       <div>
-        <span className={`status-pill ${statusClass(application.status)}`}>{formatStatus(application.status)}</span>
+        {editing ? (
+          <div style={{ display: "inline-flex", flexDirection: "column", gap: 4, alignItems: "flex-start" }}>
+            <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <select
+                value={selectedStatus}
+                onChange={(e) => setSelectedStatus(e.target.value)}
+                disabled={saving}
+                style={{ padding: "4px 8px", fontSize: 12, borderRadius: 4, border: "1px solid #cbd5e1", background: "#fff" }}
+              >
+                <option value="SHORTLISTED">SHORTLISTED</option>
+                <option value="INTERVIEW_COMPLETED">INTERVIEW COMPLETED</option>
+                <option value="SELECTED">SELECTED</option>
+                <option value="REJECTED">REJECTED</option>
+                <option value="NOT_SHORTLISTED">NOT SHORTLISTED</option>
+                <option value="APPLIED">APPLIED</option>
+              </select>
+              <button
+                type="button"
+                onClick={handleSaveStatus}
+                disabled={saving}
+                title="Save status"
+                style={{
+                  background: "#0f766e",
+                  color: "#ffffff",
+                  border: "none",
+                  borderRadius: 4,
+                  padding: "4px 8px",
+                  cursor: "pointer",
+                  fontSize: 12,
+                  fontWeight: 600,
+                }}
+              >
+                {saving ? "..." : "Save"}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setEditing(false); setError(""); }}
+                disabled={saving}
+                title="Cancel"
+                style={{
+                  background: "#f1f5f9",
+                  color: "#475569",
+                  border: "1px solid #cbd5e1",
+                  borderRadius: 4,
+                  padding: "4px 8px",
+                  cursor: "pointer",
+                  fontSize: 12,
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+            {error && <span style={{ color: "#e11d48", fontSize: 11 }}>{error}</span>}
+          </div>
+        ) : (
+          <span className={`status-pill ${statusClass(application.status)}`}>{formatStatus(application.status)}</span>
+        )}
       </div>
       <div>
         <span>{formatDate(application.applied_at)}</span>
       </div>
-      <div className="link-group">
+      <div className="link-group" style={{ display: "flex", alignItems: "center", gap: 8 }}>
         {links.length ? (
           links.map(([label, href]) => (
             <a key={label} href={href} target="_blank" rel="noreferrer" title={label} className="icon-link">
@@ -5755,6 +5978,28 @@ function ApplicantRow({ application }) {
           ))
         ) : (
           <span className="muted">No links</span>
+        )}
+        {adminToken && !editing && (
+          <button
+            type="button"
+            className="icon-link"
+            onClick={() => {
+              setSelectedStatus(currentStatus || "SHORTLISTED");
+              setEditing(true);
+            }}
+            title="Edit Status"
+            style={{
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              padding: 4,
+              display: "inline-flex",
+              alignItems: "center",
+              color: "#64748b",
+            }}
+          >
+            <Pencil size={15} />
+          </button>
         )}
       </div>
     </div>
