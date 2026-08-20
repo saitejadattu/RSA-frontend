@@ -4083,6 +4083,17 @@ const sheetApi = {
       adminToken,
       body: { confirm, force, replace },
     }),
+  autoSyncResponse: (adminToken, opportunityId) =>
+    apiRequest(`/admin/opportunities/${opportunityId}/sync/responses/auto`, {
+      method: "POST",
+      adminToken,
+    }),
+  deleteOpportunity: (adminToken, opportunityId, reason) =>
+    apiRequest(`/admin/opportunities/${opportunityId}`, {
+      method: "DELETE",
+      adminToken,
+      body: { reason },
+    }),
   masterFetch: (adminToken, url, confirm) =>
     apiRequest("/admin/companies/import/fetch", {
       method: "POST",
@@ -4714,6 +4725,7 @@ function SheetImportPanel({ adminToken, opportunityId, opportunity, onImported }
   const [preview, setPreview] = useState(null);
   const [applied, setApplied] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [fetchingResponse, setFetchingResponse] = useState(false);
   const [error, setError] = useState("");
   // The guided fetch-from-sheet flow: responses first, then shortlist, so the
   // shortlist can match against the students the responses just created.
@@ -4750,7 +4762,7 @@ function SheetImportPanel({ adminToken, opportunityId, opportunity, onImported }
     setLinkMsg("");
     try {
       await sheetApi.updateLinks(adminToken, opportunityId, body);
-      setLinkMsg("Saved. Now use “Sync from sheets” to pull the updated data.");
+      setLinkMsg("Saved. Now use “Fetch Data” to pull the updated response sheet.");
       onImported?.();
     } catch (e) {
       setLinkMsg(e.message || "Could not save the links.");
@@ -4772,6 +4784,22 @@ function SheetImportPanel({ adminToken, opportunityId, opportunity, onImported }
     setSyncStep(null);
     setReplace(false);
     reset();
+  }
+
+  async function fetchResponseSheet() {
+    setBusy(true);
+    setFetchingResponse(true);
+    reset();
+    try {
+      const result = await sheetApi.autoSyncResponse(adminToken, opportunityId);
+      setApplied(result);
+      onImported?.();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setFetchingResponse(false);
+      setBusy(false);
+    }
   }
 
   // A sync preview returns mode:"skipped" when the opening was already
@@ -4891,9 +4919,9 @@ function SheetImportPanel({ adminToken, opportunityId, opportunity, onImported }
               <Link2 size={15} />
               Sheet links
             </button>
-            <button type="button" className="rsa-sync-btn" onClick={startSync} disabled={busy}>
-              {busy ? <Loader2 className="spin" size={15} /> : <RefreshCw size={15} />}
-              Sync from sheets
+            <button type="button" className="rsa-sync-btn" onClick={fetchResponseSheet} disabled={busy}>
+              {fetchingResponse ? <Loader2 className="spin" size={15} /> : <RefreshCw size={15} />}
+              Fetch Data
             </button>
           </div>
         ) : null}
@@ -4989,17 +5017,33 @@ function SheetImportPanel({ adminToken, opportunityId, opportunity, onImported }
 
       {error ? <StatusMessage error={error} /> : null}
 
+      {fetchingResponse ? (
+        <div className="status" style={{ marginBottom: 12 }}>
+          <Loader2 className="spin" size={18} />
+          <span>Fetching response sheet...</span>
+        </div>
+      ) : null}
+
       {applied ? (
         <div className="status success" style={{ marginBottom: 12 }}>
           <BadgeCheck size={18} />
           <span>
-            {applied.synced
-              ? "Synced from Google Sheets."
-              : `Imported ${applied.counts.rows} row(s): ${
-                  kind === "responses"
-                    ? `${applied.counts.applications_to_create} created, ${applied.counts.applications_to_update} updated, ${applied.counts.students_to_create} new students`
-                    : `${applied.counts.applications_to_mark} marked shortlisted`
-                }${applied.counts.status_preserved ? ` · ${applied.counts.status_preserved} kept their existing status` : ""}`}
+            {applied.mode === "skipped"
+              ? applied.message
+              : applied.synced
+                ? "Synced from Google Sheets."
+                : kind === "responses"
+                  ? `Response sheet imported successfully. Students created: ${applied.counts.students_to_create ?? 0}. Students updated: ${applied.counts.students_matched ?? 0}. Applications created: ${applied.counts.applications_to_create ?? 0}. Applications updated: ${applied.counts.applications_to_update ?? 0}. Skipped rows: ${applied.counts.skipped ?? 0}.`
+                  : `Imported ${applied.counts.rows} row(s): ${applied.counts.applications_to_mark} marked shortlisted${applied.counts.status_preserved ? ` · ${applied.counts.status_preserved} kept their existing status` : ""}`}
+          </span>
+        </div>
+      ) : null}
+
+      {applied?.shortlist_counts ? (
+        <div className="status success" style={{ marginBottom: 12 }}>
+          <BadgeCheck size={18} />
+          <span>
+            Shortlist imported successfully. Applications shortlisted: {applied.shortlist_counts.shortlisted ?? applied.shortlist_counts.applications_to_mark ?? 0}. Skipped rows: {((applied.shortlist_counts.ambiguous ?? 0) + (applied.shortlist_counts.unmatched ?? 0))}.
           </span>
         </div>
       ) : null}
@@ -5538,6 +5582,10 @@ function OpportunityDetail({ detail, adminToken, opportunityId, onRefresh }) {
   const [confirmBulkReject, setConfirmBulkReject] = useState(false);
   const [bulkRejecting, setBulkRejecting] = useState(false);
   const [bulkRejectError, setBulkRejectError] = useState("");
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteReason, setDeleteReason] = useState("");
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
 
   const o = detail.opportunity || {};
   const stats = detail.stats || {};
@@ -5587,6 +5635,25 @@ function OpportunityDetail({ detail, adminToken, opportunityId, onRefresh }) {
       setBulkRejectError(err.message || "Failed to mark candidates as Not Selected");
     } finally {
       setBulkRejecting(false);
+    }
+  };
+
+  const handleDeleteOpportunity = async () => {
+    const reason = deleteReason.trim();
+    if (!reason) {
+      setDeleteError("A deletion reason is required.");
+      return;
+    }
+    if (!window.confirm("Are you sure you want to delete this opportunity?")) return;
+
+    setDeleteBusy(true);
+    setDeleteError("");
+    try {
+      await sheetApi.deleteOpportunity(adminToken, opportunityId, reason);
+      window.location.hash = `#/admin/company/${o.company_id || detail.company?.id || ""}`;
+    } catch (err) {
+      setDeleteError(err.message || "Failed to delete opportunity.");
+      setDeleteBusy(false);
     }
   };
 
@@ -5657,7 +5724,40 @@ function OpportunityDetail({ detail, adminToken, opportunityId, onRefresh }) {
             {o.company_status ? (
               <span className={`status-pill ${companyStatusClass(o.company_status)}`}>{o.company_status}</span>
             ) : null}
+            <button
+              type="button"
+              className="back-button"
+              onClick={() => { setDeleteOpen(true); setDeleteError(""); }}
+              disabled={deleteBusy}
+              style={{ marginLeft: "auto", color: "#b42318", borderColor: "#f3b5b0" }}
+            >
+              Delete Opportunity
+            </button>
           </div>
+
+          {deleteOpen ? (
+            <div className="rsa-warning" style={{ marginBottom: 14, display: "block" }}>
+              <strong>Delete Opportunity</strong>
+              <p style={{ margin: "8px 0" }}>Provide a reason before continuing. The opportunity and related records will be archived, not removed.</p>
+              <textarea
+                className="rsa-textarea"
+                value={deleteReason}
+                onChange={(event) => setDeleteReason(event.target.value)}
+                placeholder="Reason for deletion"
+                disabled={deleteBusy}
+                rows={3}
+              />
+              {deleteError ? <StatusMessage error={deleteError} /> : null}
+              <div className="rsa-actions">
+                <button type="button" className="back-button" onClick={() => setDeleteOpen(false)} disabled={deleteBusy}>
+                  Cancel
+                </button>
+                <button type="button" className="primary-button" onClick={handleDeleteOpportunity} disabled={deleteBusy || !deleteReason.trim()}>
+                  {deleteBusy ? "Archiving..." : "Continue"}
+                </button>
+              </div>
+            </div>
+          ) : null}
 
           <DetailGroup title="Key facts" fields={keyFacts} />
           <DetailGroup title="CRM pipeline" fields={pipeline} />
