@@ -1548,9 +1548,9 @@ function AdminDashboard({ adminToken, onLogout, route = [], navigate = () => {} 
     } else if (sortBy === "applied_desc") {
       return (b.application_count ?? 0) - (a.application_count ?? 0);
     } else if (sortBy === "shortlisted_asc") {
-      return (a.shortlisted_count ?? 0) - (b.shortlisted_count ?? 0);
+      return (a.shortlists_count ?? 0) - (b.shortlists_count ?? 0);
     } else if (sortBy === "shortlisted_desc") {
-      return (b.shortlisted_count ?? 0) - (a.shortlisted_count ?? 0);
+      return (b.shortlists_count ?? 0) - (a.shortlists_count ?? 0);
     } else if (sortBy === "response_asc") {
       return (a.response_count ?? 0) - (b.response_count ?? 0);
     } else if (sortBy === "response_desc") {
@@ -2906,7 +2906,7 @@ function AdminOverview({
                         <span>{o.tech_stack || o.must_have_skills || "—"}</span>
                       </div>
                       <span className="ov-applied">{o.application_count ?? 0}</span>
-                      <ShortlistCell applied={o.application_count ?? 0} shortlisted={o.shortlisted_count ?? 0} />
+                      <ShortlistCell applied={o.application_count ?? 0} shortlisted={o.shortlists_count ?? 0} />
                       <span className="ov-date">{formatDate(o.opportunity_received_at)}</span>
                     </div>
                   ))}
@@ -3947,7 +3947,11 @@ function CompanyDetailView({ adminToken, companyId, onBack, selectedOppId, onSel
           <section className="stats-grid admin-stats">
             <Metric icon={<BriefcaseBusiness size={20} />} label="Opportunities" value={data.opportunity_count ?? 0} />
             <Metric icon={<UsersRound size={20} />} label="Applied" value={stats.applied_count ?? 0} />
-            <Metric icon={<BadgeCheck size={20} />} label="Shortlisted" value={stats.shortlisted_count ?? 0} />
+            <Metric
+              icon={<BadgeCheck size={20} />}
+              label="Shortlisted"
+              value={selectedOppId ? (oppData?.opportunity?.shortlists_count ?? 0) : (stats.shortlisted_count ?? 0)}
+            />
             <Metric icon={<BarChart3 size={20} />} label="Responses" value={stats.response_count ?? 0} />
           </section>
 
@@ -5711,7 +5715,7 @@ function OpportunityDetail({ detail, adminToken, opportunityId, onRefresh }) {
     <>
       <section className="stats-grid admin-stats">
         <Metric icon={<UsersRound size={20} />} label="Applied" value={stats.applied_count ?? 0} />
-        <Metric icon={<BadgeCheck size={20} />} label="Shortlisted" value={stats.shortlisted_count ?? 0} />
+        <Metric icon={<BadgeCheck size={20} />} label="Shortlisted" value={o.shortlists_count ?? 0} />
         <Metric icon={<XCircle size={20} />} label="Rejected" value={stats.rejected_count ?? 0} />
         <Metric icon={<BarChart3 size={20} />} label="Responses" value={stats.response_count ?? 0} />
       </section>
