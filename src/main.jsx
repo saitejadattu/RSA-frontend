@@ -977,6 +977,13 @@ function StudentDashboard({ student, token, onLogout, route = [], navigate = () 
   const [loadingReports, setLoadingReports] = useState(true);
   const [focusReportId, setFocusReportId] = useState(null);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [issueOpen, setIssueOpen] = useState(false);
+  const [issueTitle, setIssueTitle] = useState("");
+  const [issueCategory, setIssueCategory] = useState("BUG");
+  const [issueDescription, setIssueDescription] = useState("");
+  const [issueBusy, setIssueBusy] = useState(false);
+  const [issueError, setIssueError] = useState("");
+  const [issueSuccess, setIssueSuccess] = useState("");
   const [openGroups, setOpenGroups] = useState({ interviewing: true, shortlisted: true, applied: false, declined: false });
 
   useEffect(() => {
@@ -1069,6 +1076,41 @@ function StudentDashboard({ student, token, onLogout, route = [], navigate = () 
 
   function toggleGroup(key) {
     setOpenGroups((prev) => ({ ...prev, [key]: !prev[key] }));
+  }
+
+  function closeIssue() {
+    setIssueOpen(false);
+    setIssueTitle("");
+    setIssueCategory("BUG");
+    setIssueDescription("");
+    setIssueError("");
+  }
+
+  async function submitIssue(event) {
+    event.preventDefault();
+    if (!issueTitle.trim() || !issueDescription.trim()) {
+      setIssueError("Title and description are required.");
+      return;
+    }
+    setIssueBusy(true);
+    setIssueError("");
+    try {
+      await apiRequest("/students/me/issues", {
+        method: "POST",
+        token,
+        body: {
+          title: issueTitle.trim(),
+          category: issueCategory,
+          description: issueDescription.trim(),
+        },
+      });
+      closeIssue();
+      setIssueSuccess("Issue submitted successfully. Thank you for helping us improve the application.");
+    } catch (err) {
+      setIssueError(err.message || "Could not submit the issue.");
+    } finally {
+      setIssueBusy(false);
+    }
   }
 
   function AppCard({ app }) {
@@ -1171,6 +1213,9 @@ function StudentDashboard({ student, token, onLogout, route = [], navigate = () 
             <h1>{greeting()}, {firstName} 👋</h1>
             {/* <p className="sd-header-sub">{headerSub}</p> */}
           </div>
+          <button type="button" className="primary-button" onClick={() => { setIssueOpen(true); setIssueSuccess(""); setIssueError(""); }}>
+            <CircleHelp size={17} /> Report an Issue
+          </button>
           <div className="sd-profile-wrap">
             <button type="button" className="sd-profile-btn" onClick={() => setProfileOpen((v) => !v)}>
               <span className="avatar">{initials}</span>
@@ -1197,6 +1242,50 @@ function StudentDashboard({ student, token, onLogout, route = [], navigate = () 
             ) : null}
           </div>
         </header>
+
+        {issueSuccess ? <StatusMessage message={issueSuccess} /> : null}
+
+        {issueOpen ? (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="student-issue-title"
+            style={{ position: "fixed", inset: 0, zIndex: 1000, display: "grid", placeItems: "center", padding: 16, background: "rgba(16, 24, 40, 0.42)" }}
+          >
+            <form onSubmit={submitIssue} className="panel" style={{ width: "min(520px, 100%)", margin: 0 }}>
+              <div className="panel-title">
+                <CircleHelp size={20} />
+                <h2 id="student-issue-title">Report an Issue</h2>
+              </div>
+              <label className="rsa-link-field">
+                <span>Title</span>
+                <input className="search-input" value={issueTitle} onChange={(event) => setIssueTitle(event.target.value)} maxLength={200} required />
+              </label>
+              <label className="rsa-link-field">
+                <span>Category</span>
+                <select className="sort-select" value={issueCategory} onChange={(event) => setIssueCategory(event.target.value)}>
+                  <option value="BUG">BUG</option>
+                  <option value="APPLICATION">APPLICATION</option>
+                  <option value="INTERVIEW">INTERVIEW</option>
+                  <option value="FEEDBACK">FEEDBACK</option>
+                  <option value="OTHER">OTHER</option>
+                </select>
+              </label>
+              <label className="rsa-link-field">
+                <span>Description</span>
+                <textarea className="rsa-textarea" value={issueDescription} onChange={(event) => setIssueDescription(event.target.value)} maxLength={5000} rows={6} required />
+              </label>
+              {issueError ? <StatusMessage error={issueError} /> : null}
+              <div className="rsa-actions">
+                <button type="button" className="back-button" onClick={closeIssue} disabled={issueBusy}>Cancel</button>
+                <button type="submit" className="primary-button" disabled={issueBusy || !issueTitle.trim() || !issueDescription.trim()}>
+                  {issueBusy ? <Loader2 className="spin" size={17} /> : <Send size={17} />}
+                  {issueBusy ? "Submitting..." : "Submit"}
+                </button>
+              </div>
+            </form>
+          </div>
+        ) : null}
 
         {view === "reports" ? (
           <StudentReportsView reports={reports} loading={loadingReports} focusId={focusReportId} onPractice={() => setView("practice")} />
@@ -1465,7 +1554,7 @@ function AdminDashboard({ adminToken, onLogout, route = [], navigate = () => {} 
   const [students, setStudents] = useState([]);
   // Navigation lives in the URL: #/admin, #/admin/students,
   // #/admin/company/<id>[/opp/<id>]. A refresh therefore lands where you were.
-  const KNOWN_VIEWS = ["students", "analytics", "student", "company", "reports"];
+  const KNOWN_VIEWS = ["students", "analytics", "student", "company", "reports", "issues"];
   const activeView = KNOWN_VIEWS.includes(route[1]) ? route[1] : "overview";
   const companyId = route[1] === "company" ? route[2] || null : null;
   const studentId = route[1] === "student" ? route[2] || null : null;
@@ -1473,6 +1562,8 @@ function AdminDashboard({ adminToken, onLogout, route = [], navigate = () => {} 
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [loadingStudents, setLoadingStudents] = useState(false);
+  const [issuesData, setIssuesData] = useState(null);
+  const [loadingIssues, setLoadingIssues] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [sortBy, setSortBy] = useState("recent");
   const [filterByRole, setFilterByRole] = useState("all");
@@ -1499,6 +1590,15 @@ function AdminDashboard({ adminToken, onLogout, route = [], navigate = () => {} 
     navigate(["admin", "students"]);
   }
 
+  function loadIssues() {
+    setLoadingIssues(true);
+    setError("");
+    apiRequest("/admin/issues?page=1&limit=50", { adminToken })
+      .then(setIssuesData)
+      .catch((err) => setError(err.message))
+      .finally(() => setLoadingIssues(false));
+  }
+
   function openCompany(company) {
     if (!company?.id) return;
     navigate(["admin", "company", company.id]);
@@ -1515,6 +1615,7 @@ function AdminDashboard({ adminToken, onLogout, route = [], navigate = () => {} 
   // Deep-linking straight to #/admin/students needs the list fetched too.
   useEffect(() => {
     if (activeView === "students" && !students.length && !loadingStudents) loadStudents();
+    if (activeView === "issues" && !issuesData && !loadingIssues) loadIssues();
   }, [activeView]);
 
   const summary = dashboard?.summary || {};
@@ -1581,6 +1682,9 @@ function AdminDashboard({ adminToken, onLogout, route = [], navigate = () => {} 
           <button className={activeView === "analytics" ? "active" : ""} type="button" onClick={() => navigate(["admin", "analytics"])}>
             <TrendingUp size={18} /> Analytics
           </button>
+          <button className={activeView === "issues" ? "active" : ""} type="button" onClick={() => navigate(["admin", "issues"])}>
+            <CircleHelp size={18} /> Issues &amp; Feedback
+          </button>
         </nav>
         <div className="side-foot">
           {actionCenter.missing_shortlist_data ? (
@@ -1633,6 +1737,16 @@ function AdminDashboard({ adminToken, onLogout, route = [], navigate = () => {} 
             </header>
             <AdminStudentsView students={students} loading={loadingStudents} navigate={navigate} />
           </>
+        ) : activeView === "issues" ? (
+          <>
+            <header className="topbar">
+              <div><p className="eyebrow">Admin Dashboard</p><h1>Issues &amp; Feedback</h1></div>
+              <button className="icon-button" type="button" onClick={loadIssues} disabled={loadingIssues} title="Refresh">
+                <RefreshCw className={loadingIssues ? "spin" : ""} size={18} />
+              </button>
+            </header>
+            <AdminIssuesView data={issuesData} loading={loadingIssues} adminToken={adminToken} />
+          </>
         ) : activeView === "reports" ? (
           <AdminReportsView adminToken={adminToken} reportsSummary={reportsSummary} navigate={navigate} />
         ) : (
@@ -1659,6 +1773,78 @@ function AdminDashboard({ adminToken, onLogout, route = [], navigate = () => {} 
         )}
       </section>
     </main>
+  );
+}
+
+function AdminIssuesView({ data, loading, adminToken }) {
+  const [selectedIssue, setSelectedIssue] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [error, setError] = useState("");
+  const summary = data?.summary || {};
+
+  async function openIssue(issue) {
+    setDetailLoading(true);
+    setError("");
+    try {
+      setSelectedIssue(await apiRequest(`/admin/issues/${issue.id}`, { adminToken }));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setDetailLoading(false);
+    }
+  }
+
+  if (loading && !data) return <PanelLoader />;
+
+  return (
+    <section className="panel wide">
+      <div className="stats-grid admin-stats">
+        <Metric icon={<CircleHelp size={20} />} label="Total Issues" value={summary.total ?? 0} />
+        <Metric icon={<AlertCircle size={20} />} label="Open Issues" value={summary.open ?? 0} />
+        <Metric icon={<CheckCircle2 size={20} />} label="Resolved Issues" value={summary.resolved ?? 0} />
+      </div>
+      {error ? <StatusMessage error={error} /> : null}
+      {selectedIssue ? (
+        <div className="rsa-warning" style={{ marginBottom: 16, display: "block" }}>
+          <button type="button" className="back-button" onClick={() => setSelectedIssue(null)} disabled={detailLoading}>
+            <ArrowLeft size={16} /> Back to issues
+          </button>
+          <h3 style={{ margin: "14px 0 8px" }}>{selectedIssue.title}</h3>
+          <p className="muted">{selectedIssue.student?.name || "Student"} · {selectedIssue.category} · {selectedIssue.status} · {formatDate(selectedIssue.created_at)}</p>
+          <p style={{ whiteSpace: "pre-wrap", lineHeight: 1.6 }}>{selectedIssue.description}</p>
+        </div>
+      ) : null}
+      {!selectedIssue ? (
+        data?.items?.length ? (
+          <div className="admin-table scrollable" data-scroll-key="issues">
+            <div className="admin-head">
+              <span>Issue</span>
+              <span>Category</span>
+              <span>Status</span>
+              <span>Student</span>
+              <span>Created</span>
+            </div>
+            {data.items.map((issue) => (
+              <button
+                type="button"
+                className="admin-row"
+                key={issue.id || issue._id}
+                onClick={() => openIssue(issue)}
+                style={{ width: "100%", textAlign: "left", border: 0, font: "inherit" }}
+              >
+                <span><strong>{issue.title}</strong></span>
+                <span>{issue.category}</span>
+                <span className={`status-pill ${issue.status === "OPEN" ? "warn" : "good"}`}>{issue.status}</span>
+                <span>{issue.student?.name || "Student"}</span>
+                <span>{formatDate(issue.created_at)}</span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="empty-state compact"><p>No student issues reported yet.</p></div>
+        )
+      ) : null}
+    </section>
   );
 }
 
