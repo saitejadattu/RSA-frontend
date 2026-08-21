@@ -1745,7 +1745,7 @@ function AdminDashboard({ adminToken, onLogout, route = [], navigate = () => {} 
                 <RefreshCw className={loadingIssues ? "spin" : ""} size={18} />
               </button>
             </header>
-            <AdminIssuesView data={issuesData} loading={loadingIssues} adminToken={adminToken} />
+            <AdminIssuesView data={issuesData} loading={loadingIssues} adminToken={adminToken} navigate={navigate} />
           </>
         ) : activeView === "reports" ? (
           <AdminReportsView adminToken={adminToken} reportsSummary={reportsSummary} navigate={navigate} />
@@ -1776,11 +1776,28 @@ function AdminDashboard({ adminToken, onLogout, route = [], navigate = () => {} 
   );
 }
 
-function AdminIssuesView({ data, loading, adminToken }) {
+function AdminIssuesView({ data, loading, adminToken, navigate = () => {} }) {
   const [selectedIssue, setSelectedIssue] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [statusBusy, setStatusBusy] = useState(false);
+  const [pendingStatus, setPendingStatus] = useState(null);
   const [error, setError] = useState("");
-  const summary = data?.summary || {};
+  const [issueItems, setIssueItems] = useState([]);
+  const [summary, setSummary] = useState({});
+
+  useEffect(() => {
+    setIssueItems(data?.items || []);
+    setSummary(data?.summary || {});
+  }, [data]);
+
+  useEffect(() => {
+    if (!pendingStatus) return undefined;
+    function handleKeyDown(event) {
+      if (event.key === "Escape" && !statusBusy) setPendingStatus(null);
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [pendingStatus, statusBusy]);
 
   async function openIssue(issue) {
     setDetailLoading(true);
@@ -1794,14 +1811,38 @@ function AdminIssuesView({ data, loading, adminToken }) {
     }
   }
 
+  async function updateIssueStatus() {
+    if (!selectedIssue || !pendingStatus) return;
+    setStatusBusy(true);
+    setError("");
+    try {
+      setSelectedIssue(await apiRequest(`/admin/issues/${selectedIssue.id}/status`, {
+        method: "PATCH",
+        adminToken,
+        body: { status: pendingStatus },
+      }));
+      setIssueItems((items) => items.map((issue) => issue.id === selectedIssue.id ? { ...issue, status: pendingStatus } : issue));
+      setSummary((current) => ({
+        ...current,
+        in_progress: Math.max(0, (current.in_progress ?? 0) + (pendingStatus === "IN_PROGRESS" ? 1 : -1)),
+        closed: Math.max(0, (current.closed ?? 0) + (pendingStatus === "CLOSED" ? 1 : -1)),
+      }));
+      setPendingStatus(null);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setStatusBusy(false);
+    }
+  }
+
   if (loading && !data) return <PanelLoader />;
 
   return (
     <section className="panel wide">
       <div className="stats-grid admin-stats">
         <Metric icon={<CircleHelp size={20} />} label="Total Issues" value={summary.total ?? 0} />
-        <Metric icon={<AlertCircle size={20} />} label="Open Issues" value={summary.open ?? 0} />
-        <Metric icon={<CheckCircle2 size={20} />} label="Resolved Issues" value={summary.resolved ?? 0} />
+        <Metric icon={<AlertCircle size={20} />} label="In Progress" value={summary.in_progress ?? 0} />
+        <Metric icon={<CheckCircle2 size={20} />} label="Closed Issues" value={summary.closed ?? 0} />
       </div>
       {error ? <StatusMessage error={error} /> : null}
       {selectedIssue ? (
@@ -1810,8 +1851,39 @@ function AdminIssuesView({ data, loading, adminToken }) {
             <ArrowLeft size={16} /> Back to issues
           </button>
           <h3 style={{ margin: "14px 0 8px" }}>{selectedIssue.title}</h3>
-          <p className="muted">{selectedIssue.student?.name || "Student"} · {selectedIssue.category} · {selectedIssue.status} · {formatDate(selectedIssue.created_at)}</p>
+          <dl style={{ display: "grid", gap: 8, margin: "14px 0" }}>
+            <div><dt className="muted">Student</dt><dd style={{ margin: 0 }}>
+              {selectedIssue.student?.id ? (
+                <button type="button" className="link-button" onClick={() => navigate(["admin", "student", selectedIssue.student.id])}>
+                  {selectedIssue.student.name || "Student"}
+                </button>
+              ) : (selectedIssue.student?.name || "Student")}
+            </dd></div>
+            <div><dt className="muted">Category</dt><dd style={{ margin: 0 }}>{selectedIssue.category}</dd></div>
+            <div><dt className="muted">Created</dt><dd style={{ margin: 0 }}>{formatDate(selectedIssue.created_at)}</dd></div>
+          </dl>
           <p style={{ whiteSpace: "pre-wrap", lineHeight: 1.6 }}>{selectedIssue.description}</p>
+          <p className="muted">
+            Last updated: {selectedIssue.updated_at ? formatDate(selectedIssue.updated_at) : "Not available"}
+            <br />
+            Last updated by: {selectedIssue.updated_by?.name || "Not available"}
+            {selectedIssue.updated_by?.email ? ` (${selectedIssue.updated_by.email})` : ""}
+          </p>
+          <label style={{ display: "grid", gap: 6, maxWidth: 280 }}>
+            <span className="muted">Status</span>
+            <select
+              className="sort-select"
+              value={selectedIssue.status}
+              onChange={(event) => {
+                const nextStatus = event.target.value;
+                if (nextStatus !== selectedIssue.status) setPendingStatus(nextStatus);
+              }}
+              disabled={statusBusy}
+            >
+              <option value="IN_PROGRESS">IN PROGRESS</option>
+              <option value="CLOSED">CLOSED</option>
+            </select>
+          </label>
         </div>
       ) : null}
       {!selectedIssue ? (
@@ -1824,7 +1896,7 @@ function AdminIssuesView({ data, loading, adminToken }) {
               <span>Student</span>
               <span>Created</span>
             </div>
-            {data.items.map((issue) => (
+            {issueItems.map((issue) => (
               <button
                 type="button"
                 className="admin-row"
@@ -1834,7 +1906,7 @@ function AdminIssuesView({ data, loading, adminToken }) {
               >
                 <span><strong>{issue.title}</strong></span>
                 <span>{issue.category}</span>
-                <span className={`status-pill ${issue.status === "OPEN" ? "warn" : "good"}`}>{issue.status}</span>
+                <span className={`status-pill ${issue.status === "IN_PROGRESS" ? "warn" : "good"}`}>{issue.status}</span>
                 <span>{issue.student?.name || "Student"}</span>
                 <span>{formatDate(issue.created_at)}</span>
               </button>
@@ -1843,6 +1915,22 @@ function AdminIssuesView({ data, loading, adminToken }) {
         ) : (
           <div className="empty-state compact"><p>No student issues reported yet.</p></div>
         )
+      ) : null}
+      {pendingStatus ? (
+        <div role="dialog" aria-modal="true" style={{ position: "fixed", inset: 0, zIndex: 1100, display: "grid", placeItems: "center", padding: 16, background: "rgba(16, 24, 40, 0.45)" }}>
+          <div className="panel" style={{ width: "min(430px, 100%)", margin: 0 }} onClick={(event) => event.stopPropagation()}>
+            <div className="panel-title"><CircleHelp size={20} /><h2>Update Issue Status</h2></div>
+            <p>Are you sure you want to mark this issue as <strong>{pendingStatus === "CLOSED" ? "CLOSED" : "IN PROGRESS"}</strong>?</p>
+            {pendingStatus === "CLOSED" ? <p className="muted">This will mark the issue as CLOSED.</p> : null}
+            <div className="rsa-actions">
+              <button type="button" className="back-button" onClick={() => setPendingStatus(null)} disabled={statusBusy}>Cancel</button>
+              <button type="button" className="primary-button" onClick={updateIssueStatus} disabled={statusBusy}>
+                {statusBusy ? <Loader2 className="spin" size={17} /> : <CheckCircle2 size={17} />}
+                {statusBusy ? "Saving..." : "Confirm"}
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
     </section>
   );
