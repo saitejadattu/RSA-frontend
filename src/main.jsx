@@ -959,16 +959,112 @@ const SD_GROUPS = [
   { key: "declined", title: "Not interested", chipLabel: "Closed", chipCls: "muted", sub: "you declined" },
 ];
 
+function StudentIssuesView({ token }) {
+  const [issues, setIssues] = useState([]);
+  const [selectedIssue, setSelectedIssue] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [reopenOpen, setReopenOpen] = useState(false);
+  const [reopenBusy, setReopenBusy] = useState(false);
+
+  useEffect(() => {
+    let current = true;
+    setLoading(true);
+    setError("");
+    apiRequest("/students/me/issues", { token })
+      .then((data) => current && setIssues(data || []))
+      .catch((err) => current && setError(err.message))
+      .finally(() => current && setLoading(false));
+    return () => { current = false; };
+  }, [token]);
+
+  async function openIssue(issue) {
+    setError("");
+    try {
+      setSelectedIssue(await apiRequest(`/students/me/issues/${issue.id}`, { token }));
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function reopenIssue() {
+    if (!selectedIssue) return;
+    setReopenBusy(true);
+    setError("");
+    try {
+      const updated = await apiRequest(`/students/me/issues/${selectedIssue.id}/reopen`, { method: "POST", token });
+      setSelectedIssue(updated);
+      setIssues((items) => items.map((issue) => issue.id === updated.id ? { ...issue, ...updated } : issue));
+      setReopenOpen(false);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setReopenBusy(false);
+    }
+  }
+
+  if (loading) return <PanelLoader />;
+
+  return (
+    <div className="sd-view-head">
+      <h2>My Issues &amp; Feedback</h2>
+      <p>Track the issues and feedback you have submitted.</p>
+      {error ? <StatusMessage error={error} /> : null}
+      {selectedIssue ? (
+        <section className="sd-card" style={{ marginTop: 18 }}>
+          <button type="button" className="back-button" onClick={() => setSelectedIssue(null)}>
+            <ArrowLeft size={16} /> Back to my issues
+          </button>
+          <h3>{selectedIssue.title}</h3>
+          <p className="sd-app-meta">{selectedIssue.category} · Created {formatDate(selectedIssue.created_at)}</p>
+          <span className={`sd-pill ${selectedIssue.status === "CLOSED" ? "good" : "warn"}`}>{selectedIssue.status === "CLOSED" ? "CLOSED" : "IN PROGRESS"}</span>
+          <p style={{ whiteSpace: "pre-wrap", lineHeight: 1.6, marginTop: 16 }}>{selectedIssue.description}</p>
+          <p className="sd-app-meta">Last updated: {selectedIssue.updated_at ? formatDate(selectedIssue.updated_at) : "Not available"}</p>
+          {selectedIssue.status === "CLOSED" ? (
+            <button type="button" className="sd-btn-primary" onClick={() => setReopenOpen(true)}>
+              <RefreshCw size={16} /> <span>Reopen Issue</span>
+            </button>
+          ) : null}
+        </section>
+      ) : issues.length ? (
+        <div className="sd-groups" style={{ marginTop: 18 }}>
+          {issues.map((issue) => (
+            <button type="button" className="sd-card" key={issue.id} onClick={() => openIssue(issue)} style={{ width: "100%", textAlign: "left", border: 0, font: "inherit", cursor: "pointer" }}>
+              <div className="sd-card-head"><strong>{issue.title}</strong><span className={`sd-pill ${issue.status === "CLOSED" ? "good" : "warn"}`}>{issue.status === "CLOSED" ? "CLOSED" : "IN PROGRESS"}</span></div>
+              <p className="sd-app-meta">{issue.category} · Created {formatDate(issue.created_at)}{issue.updated_at ? ` · Updated ${formatDate(issue.updated_at)}` : ""}</p>
+              <p className="sd-empty-note">{issue.description}</p>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="sd-card" style={{ marginTop: 18 }}><p className="sd-empty-note">You have not submitted any issues yet.</p></div>
+      )}
+      {reopenOpen ? (
+        <div role="dialog" aria-modal="true" style={{ position: "fixed", inset: 0, zIndex: 1100, display: "grid", placeItems: "center", padding: 16, background: "rgba(16, 24, 40, 0.45)" }}>
+          <div className="sd-card" style={{ width: "min(420px, 100%)" }} onClick={(event) => event.stopPropagation()}>
+            <h3>Reopen this issue?</h3>
+            <p>This issue is currently closed. Would you like to reopen it?</p>
+            <div className="rsa-actions">
+              <button type="button" className="back-button" onClick={() => setReopenOpen(false)} disabled={reopenBusy}>Cancel</button>
+              <button type="button" className="sd-btn-primary" onClick={reopenIssue} disabled={reopenBusy}>{reopenBusy ? "Reopening..." : "Reopen"}</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function StudentDashboard({ student, token, onLogout, route = [], navigate = () => {} }) {
   const [dashboard, setDashboard] = useState(null);
   const [dashboardError, setDashboardError] = useState("");
   const [loadingDashboard, setLoadingDashboard] = useState(true);
   // #/student/feedback and #/student/practice survive a refresh.
   const view =
-    route[1] === "feedback" ? "reports" : route[1] === "practice" ? "practice" : "dashboard";
+    route[1] === "feedback" ? "reports" : route[1] === "practice" ? "practice" : route[1] === "issues" ? "issues" : "dashboard";
   const setView = useCallback(
     (next) => {
-      const seg = next === "reports" ? "feedback" : next === "practice" ? "practice" : "";
+      const seg = next === "reports" ? "feedback" : next === "practice" ? "practice" : next === "issues" ? "issues" : "";
       navigate(["student", seg]);
     },
     [navigate],
@@ -1196,6 +1292,9 @@ function StudentDashboard({ student, token, onLogout, route = [], navigate = () 
           <button type="button" className={view === "practice" ? "active" : ""} onClick={() => setView("practice")}>
             <BookOpenCheck size={18} /> Practice questions
           </button>
+          <button type="button" className={view === "issues" ? "active" : ""} onClick={() => setView("issues")}>
+            <CircleHelp size={18} /> My Issues &amp; Feedback
+          </button>
         </nav>
         <div className="sd-side-foot">
           {shortlisted.length ? (
@@ -1287,7 +1386,9 @@ function StudentDashboard({ student, token, onLogout, route = [], navigate = () 
           </div>
         ) : null}
 
-        {view === "reports" ? (
+        {view === "issues" ? (
+          <StudentIssuesView token={token} />
+        ) : view === "reports" ? (
           <StudentReportsView reports={reports} loading={loadingReports} focusId={focusReportId} onPractice={() => setView("practice")} />
         ) : view === "practice" ? (
           <StudentPracticeView token={token} />
@@ -1564,6 +1665,7 @@ function AdminDashboard({ adminToken, onLogout, route = [], navigate = () => {} 
   const [loadingStudents, setLoadingStudents] = useState(false);
   const [issuesData, setIssuesData] = useState(null);
   const [loadingIssues, setLoadingIssues] = useState(false);
+  const [issueFilters, setIssueFilters] = useState({ status: "", category: "", sort: "newest" });
   const [searchTerm, setSearchTerm] = useState("");
   const [sortBy, setSortBy] = useState("recent");
   const [filterByRole, setFilterByRole] = useState("all");
@@ -1590,10 +1692,12 @@ function AdminDashboard({ adminToken, onLogout, route = [], navigate = () => {} 
     navigate(["admin", "students"]);
   }
 
-  function loadIssues() {
+  function loadIssues(filters = issueFilters) {
     setLoadingIssues(true);
     setError("");
-    apiRequest("/admin/issues?page=1&limit=50", { adminToken })
+    const query = new URLSearchParams({ page: "1", limit: "50", ...filters });
+    [...query.keys()].forEach((key) => { if (!query.get(key)) query.delete(key); });
+    apiRequest(`/admin/issues?${query.toString()}`, { adminToken })
       .then(setIssuesData)
       .catch((err) => setError(err.message))
       .finally(() => setLoadingIssues(false));
@@ -1745,7 +1849,7 @@ function AdminDashboard({ adminToken, onLogout, route = [], navigate = () => {} 
                 <RefreshCw className={loadingIssues ? "spin" : ""} size={18} />
               </button>
             </header>
-            <AdminIssuesView data={issuesData} loading={loadingIssues} adminToken={adminToken} navigate={navigate} />
+            <AdminIssuesView data={issuesData} loading={loadingIssues} adminToken={adminToken} navigate={navigate} filters={issueFilters} onFiltersChange={(filters) => { setIssueFilters(filters); loadIssues(filters); }} />
           </>
         ) : activeView === "reports" ? (
           <AdminReportsView adminToken={adminToken} reportsSummary={reportsSummary} navigate={navigate} />
@@ -1776,7 +1880,7 @@ function AdminDashboard({ adminToken, onLogout, route = [], navigate = () => {} 
   );
 }
 
-function AdminIssuesView({ data, loading, adminToken, navigate = () => {} }) {
+function AdminIssuesView({ data, loading, adminToken, navigate = () => {}, filters, onFiltersChange = () => {} }) {
   const [selectedIssue, setSelectedIssue] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [statusBusy, setStatusBusy] = useState(false);
@@ -1843,6 +1947,36 @@ function AdminIssuesView({ data, loading, adminToken, navigate = () => {} }) {
         <Metric icon={<CircleHelp size={20} />} label="Total Issues" value={summary.total ?? 0} />
         <Metric icon={<AlertCircle size={20} />} label="In Progress" value={summary.in_progress ?? 0} />
         <Metric icon={<CheckCircle2 size={20} />} label="Closed Issues" value={summary.closed ?? 0} />
+      </div>
+      <div className="controls-row" style={{ marginBottom: 16 }}>
+        <label className="sort-controls">
+          <span>Status</span>
+          <select className="sort-select" value={filters.status} onChange={(event) => onFiltersChange({ ...filters, status: event.target.value })}>
+            <option value="">All</option>
+            <option value="IN_PROGRESS">IN PROGRESS</option>
+            <option value="CLOSED">CLOSED</option>
+          </select>
+        </label>
+        <label className="sort-controls">
+          <span>Category</span>
+          <select className="sort-select" value={filters.category} onChange={(event) => onFiltersChange({ ...filters, category: event.target.value })}>
+            <option value="">All</option>
+            <option value="BUG">BUG</option>
+            <option value="APPLICATION">APPLICATION</option>
+            <option value="INTERVIEW">INTERVIEW</option>
+            <option value="FEEDBACK">FEEDBACK</option>
+            <option value="GENERAL">GENERAL</option>
+            <option value="OTHER">OTHER</option>
+          </select>
+        </label>
+        <label className="sort-controls">
+          <span>Sort</span>
+          <select className="sort-select" value={filters.sort} onChange={(event) => onFiltersChange({ ...filters, sort: event.target.value })}>
+            <option value="newest">Newest first</option>
+            <option value="oldest">Oldest first</option>
+            <option value="updated">Recently updated</option>
+          </select>
+        </label>
       </div>
       {error ? <StatusMessage error={error} /> : null}
       {selectedIssue ? (
