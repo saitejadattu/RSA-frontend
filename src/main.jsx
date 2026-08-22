@@ -2214,6 +2214,7 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
   const [gen, setGen] = useState(null); // {done,total,current} while generating
   const [genOne, setGenOne] = useState(null); // session id being (re)generated on its own
   const [filter, setFilter] = useState("all"); // all | pending | published (report publish state)
+  const [reportSearch, setReportSearch] = useState("");
   const [monthFilter, setMonthFilter] = useState("all"); // all | YYYY-MM (interview date month)
   const [companyFilter, setCompanyFilter] = useState("all");
   const [feedbackView, setFeedbackView] = useState("company"); // company | student
@@ -2533,8 +2534,10 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
     const byMonth = monthFilter === "all"
       ? byPublishState
       : byPublishState.filter((report) => monthKeyForReport(report) === monthFilter);
-    return companyFilter === "all" ? byMonth : byMonth.filter((report) => report.company === companyFilter);
-  }, [reports, filter, monthFilter, companyFilter]);
+    const byCompany = companyFilter === "all" ? byMonth : byMonth.filter((report) => report.company === companyFilter);
+    const search = reportSearch.trim().toLowerCase();
+    return search ? byCompany.filter((report) => (report.company || "").toLowerCase().includes(search)) : byCompany;
+  }, [reports, filter, monthFilter, companyFilter, reportSearch]);
 
   const studentCompanies = useMemo(() => [...new Set(reports.map((r) => r.company).filter(Boolean))]
     .sort((a, b) => a.localeCompare(b)), [reports]);
@@ -2776,6 +2779,15 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
 
       {!loading && reports.length ? (
         <div className="rep-filters">
+          <label className="student-search rep-toolbar-search">
+            <span>Search company</span>
+            <input
+              value={reportSearch}
+              onChange={(event) => { setReportSearch(event.target.value); setOpenCompany(null); setOpenStudentId(null); }}
+              placeholder="Search company..."
+              aria-label="Search interview reports by company"
+            />
+          </label>
           <div className="rep-toolbar-status" aria-label="Report status filter">
             <span className="rep-filter-label">Status</span>
             <button type="button" className={`rep-chip ${filter === "all" ? "on" : ""}`} onClick={() => setFilter("all")}>
@@ -2859,7 +2871,7 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
             {studentReports.length !== reports.length ? <p className="ov-sub">Filtered from {reports.length} available reports</p> : null}
           </div>
           {!studentReports.length ? (
-            <div className="empty-state compact"><p>No student feedback matches these filters.</p></div>
+            <div className="empty-state compact"><p>{reportSearch.trim() ? "No interview reports found." : "No student feedback matches these filters."}</p></div>
           ) : (
             <>
               <div className="student-export-actions">
@@ -3027,7 +3039,7 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
             {filter === "pending" ? "No pending reports — everything is published."
               : filter === "published" ? "No published reports yet."
               : monthFilter !== "all" ? "No interview reports for this month."
-              : "No interview reports yet."}
+              : reportSearch.trim() ? "No interview reports found." : "No interview reports yet."}
           </p>
         </div>
       ) : (
