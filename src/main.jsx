@@ -3269,7 +3269,7 @@ function AdminOverview({
       </section> */}
 
       <div className="">
-        <section className="ov-card">
+        {/* <section className="ov-card">
           <h2>Where we lose people</h2>
           <p className="ov-muted">Slices of the {fmt(applied)} applications. Neither is a rejection, and they can overlap.</p>
           <div className="ov-loss">
@@ -3277,7 +3277,7 @@ function AdminOverview({
             <LossItem label="Awaiting company response" n={loss.awaiting} applied={applied} color="#f59e0b" note="Still at Applied with no decision recorded. Stalled, not lost — this is the pile the action queue chases." />
             <LossItem label="Not shortlisted — resume screen" n={loss.not_shortlisted} applied={applied} color="#b42318" note="A resume-stage pass with the company's note attached where they gave one — never a failed interview." />
           </div>
-        </section>
+        </section> */}
 
         {/* <section className="ov-card">
           <div className="ov-card-head-row">
@@ -5515,6 +5515,32 @@ function SheetImportPanel({ adminToken, opportunityId, opportunity, onImported }
     }
   }
 
+  async function fetchAndSyncSheets() {
+    if (busy) return;
+    const hasResponseSheet = Boolean((opportunity?.student_response_sheet || "").trim());
+    const hasShortlistSheet = Boolean((opportunity?.company_sheet || "").trim());
+    if (!hasResponseSheet) {
+      setError("Response sheet URL missing. Add it via Sheet links or use the paste workflow.");
+      return;
+    }
+
+    setBusy(true);
+    setFetchingResponse(true);
+    reset();
+    try {
+      const result = hasShortlistSheet
+        ? await sheetApi.autoSyncResponse(adminToken, opportunityId)
+        : await sheetApi.sync(adminToken, opportunityId, "responses", true, true);
+      setApplied({ ...result, synced: true, responseOnly: !hasShortlistSheet });
+      await onImported?.(result);
+    } catch (err) {
+      setError(err.message || "Could not fetch the sheets.");
+    } finally {
+      setFetchingResponse(false);
+      setBusy(false);
+    }
+  }
+
   // A sync preview returns mode:"skipped" when the opening was already
   // extracted; show the Force option instead of a preview.
   async function syncPreview(step, force = false, replaceArg = replace) {
@@ -5628,6 +5654,20 @@ function SheetImportPanel({ adminToken, opportunityId, opportunity, onImported }
         <h2>Import sheet data</h2>
         {!inSync && !preview ? (
           <div className="rsa-title-actions">
+            <button
+              type="button"
+              className="rsa-sync-btn"
+              onClick={fetchAndSyncSheets}
+              disabled={busy || !(opportunity?.student_response_sheet || "").trim()}
+              title={
+                !(opportunity?.student_response_sheet || "").trim()
+                  ? "Response sheet URL missing"
+                  : "Fetch response sheet, then shortlist sheet"
+              }
+            >
+              {busy ? <Loader2 className="spin" size={15} /> : <RefreshCw size={15} />}
+              {busy ? "Fetching..." : (opportunity?.company_sheet || "").trim() ? "Fetch & Sync Sheets" : "Fetch Response Sheet"}
+            </button>
             <button type="button" className="rsa-link-btn" onClick={toggleLinks} disabled={busy}>
               <Link2 size={15} />
               Sheet links
@@ -5725,6 +5765,22 @@ function SheetImportPanel({ adminToken, opportunityId, opportunity, onImported }
       ) : null}
 
       {error ? <StatusMessage error={error} /> : null}
+
+      {!((opportunity?.student_response_sheet || "").trim()) ? (
+        <div className="rsa-warning" style={{ marginBottom: 12 }}>
+          <TriangleAlert size={16} />
+          <span>
+            Response sheet URL missing. Automatic response import is unavailable.
+            {((opportunity?.company_sheet || "").trim()) ? " Automatic shortlist sync is unavailable until the response stage succeeds." : ""}
+          </span>
+        </div>
+      ) : null}
+      {((opportunity?.student_response_sheet || "").trim()) && !((opportunity?.company_sheet || "").trim()) ? (
+        <div className="rsa-warning" style={{ marginBottom: 12 }}>
+          <TriangleAlert size={16} />
+          <span>Shortlist sheet URL missing. Response fetching remains available; shortlist import requires the response stage first.</span>
+        </div>
+      ) : null}
 
       {fetchingResponse ? (
         <div className="status" style={{ marginBottom: 12 }}>
@@ -6419,7 +6475,7 @@ function OpportunityDetail({ detail, adminToken, opportunityId, onRefresh }) {
   return (
     <>
       <section className="stats-grid admin-stats">
-        <Metric icon={<UsersRound size={20} />} label="Applied" value={stats.applied_count ?? 0} />
+        <Metric icon={<UsersRound size={20} />} label="Applied" value={o.application_count ?? 0} />
         <Metric icon={<BadgeCheck size={20} />} label="Shortlisted" value={o.shortlists_count ?? 0} />
         <Metric icon={<XCircle size={20} />} label="Rejected" value={stats.rejected_count ?? 0} />
         <Metric icon={<BarChart3 size={20} />} label="Responses" value={stats.response_count ?? 0} />
