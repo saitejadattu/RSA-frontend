@@ -3448,24 +3448,24 @@ input:focus {
 .ov-cell > span { color: #65717e; font-size: 13px; overflow-wrap: anywhere; }
 .ov-cell strong { font-weight: 700; }
 .ov-applied { font-size: 15px; font-weight: 800; color: #1f2937; }
+
+.ov-no-student-star {
+  color: #dc2626;
+  font-weight: 700;
+  margin-left: 4px;
+}
 .ov-sl { justify-self: start; font-size: 13px; font-weight: 800; }
 .ov-sl.good { color: #0f766e; }
 .ov-sl-pct { font-weight: 700; color: #98a2b3; font-size: 12px; }
 .ov-sl.none { font-size: 12px; font-weight: 700; color: #b54708; background: #fffaeb; padding: 3px 9px; border-radius: 999px; }
 .ov-sl.zero { color: #98a2b3; }
 .ov-date { color: #65717e; font-size: 13px; white-space: nowrap; }
-.ov-status-cell { display: flex; flex-direction: column; min-width: 0; }
-.ov-sync-results { display: flex; flex-direction: column; gap: 3px; max-width: 100%; }
-.ov-sync-status { font-size: 11px; line-height: 1.35; overflow-wrap: anywhere; display: flex; flex-direction: column; gap: 1px; }
-.ov-sync-line { display: flex; align-items: baseline; gap: 4px; }
-.ov-sync-icon { font-weight: 700; flex-shrink: 0; font-size: 11px; }
-.ov-sync-status.success { color: #047857; }
-.ov-sync-status.skipped { color: #b45309; }
-.ov-sync-status.failed { color: #b42318; }
-.ov-sync-error-container { display: flex; flex-direction: column; gap: 1px; }
-.ov-sync-error-msg { font-size: 10.5px; color: #991b1b; margin-left: 14px; line-height: 1.25; word-break: break-word; }
-.ov-sync-detail-btn { background: none; border: none; padding: 0; font-size: 10px; color: #4338ca; text-decoration: underline; cursor: pointer; margin-left: 4px; }
-.ov-sync-detail-btn:hover { color: #312e81; }
+.ov-sheet-availability { display: inline-flex; align-items: center; gap: 6px; min-width: 0; font-size: 11.5px; font-weight: 700; white-space: nowrap; }
+.ov-sheet-dot { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; background: currentColor; }
+.ov-sheet-availability.available { color: #047857; }
+.ov-sheet-availability.response-only { color: #a16207; }
+.ov-sheet-availability.shortlist-only { color: #7e22ce; }
+.ov-sheet-availability.none { color: #b42318; }
 
 /* coming-soon placeholder */
 .ov-soon { display: grid; justify-items: start; gap: 12px; color: #475467; }

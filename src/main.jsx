@@ -1672,28 +1672,9 @@ function AdminDashboard({ adminToken, onLogout, route = [], navigate = () => {} 
   const [searchTerm, setSearchTerm] = useState("");
   const [sortBy, setSortBy] = useState("recent");
   const [filterByRole, setFilterByRole] = useState("all");
-  const [syncResults, setSyncResults] = useState({});
   const dashboardFetchId = useRef(0);
 
   function handleOverviewImport(result) {
-    const oppResults =
-      result?.opportunity_results ||
-      result?.result?.opportunity_results ||
-      result?.processed_opportunities ||
-      result?.result?.processed_opportunities ||
-      (Array.isArray(result) ? result : null);
-
-    if (Array.isArray(oppResults) && oppResults.length) {
-      const entries = oppResults
-        .map((item) => {
-          const id = item.opportunity_id || item.id || item._id;
-          return id ? [String(id), item] : null;
-        })
-        .filter(Boolean);
-      setSyncResults(Object.fromEntries(entries));
-    } else {
-      setSyncResults({});
-    }
     return loadDashboard();
   }
 
@@ -1897,7 +1878,6 @@ function AdminDashboard({ adminToken, onLogout, route = [], navigate = () => {} 
             placement={placement}
             reportsSummary={reportsSummary}
             recentOpportunities={sortedOpportunities}
-            syncResults={syncResults}
             onImport={handleOverviewImport}
             searchTerm={searchTerm}
             setSearchTerm={setSearchTerm}
@@ -3208,7 +3188,7 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
 function AdminOverview({
   loading, summary, funnel, loss, actionCenter, placement, reportsSummary,
   recentOpportunities, searchTerm, setSearchTerm, sortBy, setSortBy,
-  syncResults, onImport, adminToken, onRefresh, openCompany, navigate,
+  onImport, adminToken, onRefresh, openCompany, navigate,
 }) {
   const [openingsOpen, setOpeningsOpen] = useState(true);
   const applied = funnel[0]?.n || 0;
@@ -3342,7 +3322,12 @@ function AdminOverview({
                   {recentOpportunities.map((o) => (
                     <div className="ov-trow" key={o.id}>
                       <div className="ov-cell">
-                        <button type="button" className="link-button" onClick={() => openCompany(o.company)} title="View company detail">{o.company?.name || "Company"}</button>
+                        <button type="button" className="link-button" onClick={() => openCompany(o.company)} title="View company detail">
+                          {o.company?.name || "Company"}
+                          {isNoStudentEligibleStatus(o.student_side_status) ? (
+                            <span className="ov-no-student-star" aria-label="No Student Eligible">*</span>
+                          ) : null}
+                        </button>
                         <span>{o.location || "—"}</span>
                       </div>
                       <div className="ov-cell">
@@ -3352,13 +3337,10 @@ function AdminOverview({
                       <span className="ov-applied">{o.application_count ?? 0}</span>
                       <ShortlistCell applied={o.application_count ?? 0} shortlisted={Number(o.shortlists_count) || 0} />
                       <span className="ov-date">{formatDate(o.opportunity_received_at)}</span>
-                      <div className="ov-status-cell">
-                        {(() => {
-                          const oppKey = String(o.id || o._id || o.opportunity_id || "");
-                          const itemSync = oppKey ? syncResults?.[oppKey] : null;
-                          return itemSync ? <OpportunitySyncStatus result={itemSync} /> : <span className="muted">—</span>;
-                        })()}
-                      </div>
+                      <SheetAvailabilityStatus
+                        studentResponseSheet={o.student_response_sheet}
+                        companySheet={o.company_sheet}
+                      />
                     </div>
                   ))}
                 </div>
@@ -3373,7 +3355,27 @@ function AdminOverview({
   );
 }
 
-function SyncErrorMessage({ label, message }) {
+function SheetAvailabilityStatus({ studentResponseSheet, companySheet }) {
+  const hasResponse = Boolean(String(studentResponseSheet || "").trim());
+  const hasShortlist = Boolean(String(companySheet || "").trim());
+  const status = hasResponse && hasShortlist
+    ? { className: "available", label: "Sheets available" }
+    : hasResponse
+      ? { className: "response-only", label: "Response sheet only" }
+      : hasShortlist
+        ? { className: "shortlist-only", label: "Shortlist sheet only" }
+        : { className: "none", label: "No sheets" };
+
+  return (
+    <div className={`ov-sheet-availability ${status.className}`}>
+      <span className="ov-sheet-dot" aria-hidden="true" />
+      <span>{status.label}</span>
+    </div>
+  );
+}
+
+/* ------------------------------ Analytics ------------------------------ */
+/* function SyncErrorMessage({ label, message }) {
   const [expanded, setExpanded] = useState(false);
   if (!message) return null;
   const cleanMsg = String(message).replace(/ObjectId\(['"]([0-9a-fA-F]{24})['"]\)/g, "$1");
@@ -3525,7 +3527,7 @@ function OpportunitySyncStatus({ result }) {
       {shortlistNode}
     </div>
   );
-}
+} */
 
 /* ------------------------------ Analytics ------------------------------ */
 
@@ -5429,6 +5431,11 @@ function changedSinceImport(changedAt, importedAt) {
   if (!changedAt) return false;
   if (!importedAt) return true;
   return new Date(changedAt).getTime() > new Date(importedAt).getTime();
+}
+
+function isNoStudentEligibleStatus(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return normalized === "no student eligible" || normalized === "no student eligble";
 }
 
 /* --- Paste a response / shortlist sheet for this opening ----------- */
