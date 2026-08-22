@@ -122,7 +122,10 @@ async function apiRequest(path, { method = "GET", body, token, adminToken } = {}
     if (response.status === 401) {
       window.dispatchEvent(new CustomEvent("auth:expired"));
     }
-    throw new Error(data?.detail || "Something went wrong");
+    const err = new Error(data?.detail || data?.message || "Something went wrong");
+    err.data = data;
+    err.status = response.status;
+    throw err;
   }
 
   return data;
@@ -1670,21 +1673,44 @@ function AdminDashboard({ adminToken, onLogout, route = [], navigate = () => {} 
   const [sortBy, setSortBy] = useState("recent");
   const [filterByRole, setFilterByRole] = useState("all");
   const [syncResults, setSyncResults] = useState({});
+  const dashboardFetchId = useRef(0);
 
   function handleOverviewImport(result) {
-    if (result?.opportunity_results) {
-      setSyncResults(Object.fromEntries(result.opportunity_results.map((item) => [item.opportunity_id, item])));
+    const oppResults =
+      result?.opportunity_results ||
+      result?.result?.opportunity_results ||
+      result?.processed_opportunities ||
+      result?.result?.processed_opportunities ||
+      (Array.isArray(result) ? result : null);
+
+    if (Array.isArray(oppResults) && oppResults.length) {
+      const entries = oppResults
+        .map((item) => {
+          const id = item.opportunity_id || item.id || item._id;
+          return id ? [String(id), item] : null;
+        })
+        .filter(Boolean);
+      setSyncResults(Object.fromEntries(entries));
+    } else {
+      setSyncResults({});
     }
-    loadDashboard();
+    return loadDashboard();
   }
 
   function loadDashboard() {
+    const fetchId = ++dashboardFetchId.current;
     setLoading(true);
     setError("");
-    apiRequest("/admin/dashboard", { adminToken })
-      .then(setDashboard)
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
+    return apiRequest("/admin/dashboard", { adminToken })
+      .then((data) => {
+        if (fetchId === dashboardFetchId.current) setDashboard(data);
+      })
+      .catch((err) => {
+        if (fetchId === dashboardFetchId.current) setError(err.message);
+      })
+      .finally(() => {
+        if (fetchId === dashboardFetchId.current) setLoading(false);
+      });
   }
 
   function loadStudents() {
@@ -3312,7 +3338,7 @@ function AdminOverview({
             ) : recentOpportunities.length ? (
               <div className="ov-table-scroll" data-scroll-key="ov-openings">
                 <div className="ov-table">
-                  <div className="ov-thead"><span>Company</span><span>Role</span><span>Applied</span><span>Shortlisted</span><span>Received</span></div>
+                  <div className="ov-thead"><span>Company</span><span>Role</span><span>Applied</span><span>Shortlisted</span><span>Received</span><span>Status</span></div>
                   {recentOpportunities.map((o) => (
                     <div className="ov-trow" key={o.id}>
                       <div className="ov-cell">
@@ -3324,10 +3350,14 @@ function AdminOverview({
                         <span>{o.tech_stack || o.must_have_skills || "—"}</span>
                       </div>
                       <span className="ov-applied">{o.application_count ?? 0}</span>
-                      <ShortlistCell applied={o.application_count ?? 0} shortlisted={o.shortlists_count ?? 0} />
-                      <div className="ov-date-sync">
-                        <span className="ov-date">{formatDate(o.opportunity_received_at)}</span>
-                        {syncResults?.[o.id] ? <OpportunitySyncStatus result={syncResults[o.id]} /> : null}
+                      <ShortlistCell applied={o.application_count ?? 0} shortlisted={Number(o.shortlists_count) || 0} />
+                      <span className="ov-date">{formatDate(o.opportunity_received_at)}</span>
+                      <div className="ov-status-cell">
+                        {(() => {
+                          const oppKey = String(o.id || o._id || o.opportunity_id || "");
+                          const itemSync = oppKey ? syncResults?.[oppKey] : null;
+                          return itemSync ? <OpportunitySyncStatus result={itemSync} /> : <span className="muted">—</span>;
+                        })()}
                       </div>
                     </div>
                   ))}
@@ -3343,19 +3373,158 @@ function AdminOverview({
   );
 }
 
+function SyncErrorMessage({ label, message }) {
+  const [expanded, setExpanded] = useState(false);
+  if (!message) return null;
+  const cleanMsg = String(message).replace(/ObjectId\(['"]([0-9a-fA-F]{24})['"]\)/g, "$1");
+  const isLong = cleanMsg.length > 70;
+  const displayText = (!expanded && isLong) ? `${cleanMsg.slice(0, 65)}…` : cleanMsg;
+
+  return (
+    <div className="ov-sync-error-container">
+      <div className="ov-sync-line">
+        <span className="ov-sync-icon">✕</span>
+        <span>{label}:</span>
+      </div>
+      <div className="ov-sync-error-msg">
+        <span>{displayText}</span>
+        {isLong ? (
+          <button
+            type="button"
+            className="ov-sync-detail-btn"
+            onClick={(e) => {
+              e.stopPropagation();
+              setExpanded((v) => !v);
+            }}
+          >
+            {expanded ? "Show less" : "View details"}
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function OpportunitySyncStatus({ result }) {
-  const stage = (label, item) => {
-    if (!item) return null;
-    const isSuccess = item.status === "SUCCESS";
-    const isSkipped = item.status === "SKIPPED";
-    return (
-      <span className={`ov-sync-status ${isSuccess ? "success" : isSkipped ? "skipped" : "failed"}`}>
-        {isSuccess ? "✓" : isSkipped ? "⚠" : "✗"} {label} {isSuccess ? "synced" : isSkipped ? "skipped" : "failed"}
-        {!isSuccess ? ` · ${item.reason || item.error || "Needs attention"}` : null}
-      </span>
-    );
-  };
-  return <div className="ov-sync-results">{stage("Response", result.response)}{stage("Shortlist", result.shortlist)}</div>;
+  if (!result) return null;
+
+  // 1. Master status
+  const isCreated = result.master?.status === "created" || result.is_new === true;
+  const isUpdated = result.master?.status === "updated" || result.is_new === false;
+  const showMaster = isCreated || isUpdated || Boolean(result.master);
+
+  // 2. Response status
+  let responseNode = null;
+  if (result.response) {
+    const status = result.response.status;
+    const error = result.response.error || "";
+    const reason = result.response.reason || "";
+    const isUrlMissing =
+      status === "SKIPPED" ||
+      reason.toLowerCase().includes("no response sheet url") ||
+      reason.toLowerCase().includes("response sheet url missing") ||
+      error.toLowerCase().includes("no response sheet url");
+
+    if (status === "SUCCESS") {
+      responseNode = (
+        <div className="ov-sync-status success">
+          <div className="ov-sync-line">
+            <span className="ov-sync-icon">✓</span>
+            <span>Response imported</span>
+          </div>
+        </div>
+      );
+    } else if (isUrlMissing) {
+      responseNode = (
+        <div className="ov-sync-status skipped">
+          <div className="ov-sync-line">
+            <span className="ov-sync-icon">⚠</span>
+            <span>Response sheet URL missing</span>
+          </div>
+        </div>
+      );
+    } else {
+      const errorMsg = error || reason || "Import failed";
+      responseNode = (
+        <div className="ov-sync-status failed">
+          <SyncErrorMessage label="Response import failed" message={errorMsg} />
+        </div>
+      );
+    }
+  }
+
+  // 3. Shortlist status
+  let shortlistNode = null;
+  if (result.shortlist) {
+    const responseSucceeded = result.response?.status === "SUCCESS";
+    const status = result.shortlist.status;
+    const error = result.shortlist.error || "";
+    const reason = result.shortlist.reason || "";
+
+    if (!responseSucceeded) {
+      // Orchestration rule: Response did not succeed (missing URL or failed),
+      // therefore Shortlist was intentionally not attempted / skipped.
+      shortlistNode = (
+        <div className="ov-sync-status skipped">
+          <div className="ov-sync-line">
+            <span className="ov-sync-icon">⚠</span>
+            <span>Shortlist skipped</span>
+          </div>
+        </div>
+      );
+    } else if (status === "SUCCESS") {
+      shortlistNode = (
+        <div className="ov-sync-status success">
+          <div className="ov-sync-line">
+            <span className="ov-sync-icon">✓</span>
+            <span>Shortlist imported</span>
+          </div>
+        </div>
+      );
+    } else {
+      const isUrlMissing =
+        status === "SKIPPED" ||
+        reason.toLowerCase().includes("no shortlist sheet url") ||
+        reason.toLowerCase().includes("shortlist sheet url missing") ||
+        reason.toLowerCase().includes("no company") ||
+        error.toLowerCase().includes("no shortlist sheet url") ||
+        error.toLowerCase().includes("no company") ||
+        error.toLowerCase().includes("shortlist sheet url is stored");
+
+      if (isUrlMissing) {
+        shortlistNode = (
+          <div className="ov-sync-status skipped">
+            <div className="ov-sync-line">
+              <span className="ov-sync-icon">⚠</span>
+              <span>Shortlist sheet URL missing</span>
+            </div>
+          </div>
+        );
+      } else {
+        const errorMsg = error || reason || "Import failed";
+        shortlistNode = (
+          <div className="ov-sync-status failed">
+            <SyncErrorMessage label="Shortlist import failed" message={errorMsg} />
+          </div>
+        );
+      }
+    }
+  }
+
+  return (
+    <div className="ov-sync-results">
+      {showMaster ? (
+        <div className="ov-sync-status success">
+          <div className="ov-sync-line">
+            <span className="ov-sync-icon">✓</span>
+            <span>Opportunity {isCreated ? "created" : "updated"}</span>
+          </div>
+        </div>
+      ) : null}
+      {responseNode}
+      {shortlistNode}
+    </div>
+  );
 }
 
 /* ------------------------------ Analytics ------------------------------ */
@@ -4930,7 +5099,7 @@ function AddCompaniesPanel({ adminToken, onImported }) {
         setApplied(result);
         setPreview(null);
         setText("");
-        onImported?.();
+        await onImported?.(result);
       } else {
         setPreview(result);
         setApplied(null);
@@ -4953,7 +5122,7 @@ function AddCompaniesPanel({ adminToken, onImported }) {
       if (confirm) {
         setApplied(result);
         setPreview(null);
-        onImported?.();
+        await onImported?.(result);
       } else {
         setPreview(result);
         setApplied(null);
@@ -4971,9 +5140,14 @@ function AddCompaniesPanel({ adminToken, onImported }) {
     try {
       const result = await sheetApi.incremental(adminToken, url.trim());
       setApplied({ incremental: true, result });
-      onImported?.(result);
+      await onImported?.(result);
     } catch (err) {
-      setError(`Incremental sync failed. ${err.message || "Please check the sync details."}`);
+      const resultData = err.data;
+      if (resultData?.opportunity_results) {
+        setApplied({ incremental: true, result: resultData });
+        await onImported?.(resultData);
+      }
+      setError(`Incremental sync completed with failures. ${err.message || "Please check the sync details."}`);
     } finally {
       setBusy(false);
     }

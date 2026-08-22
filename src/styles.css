@@ -3429,13 +3429,14 @@ input:focus {
 .ov-table { display: grid; border: 1px solid #e5eaf0; border-radius: 8px; overflow: hidden; }
 .ov-thead, .ov-trow {
   display: grid;
-  grid-template-columns: 1.15fr 1.3fr 0.6fr 0.8fr 0.7fr;
+  grid-template-columns: 1.15fr 1.2fr 0.55fr 0.75fr 0.75fr 1.35fr;
   gap: 12px;
-  align-items: center;
+  align-items: start;
   padding: 0 12px;
 }
 .ov-thead {
   min-height: 42px;
+  align-items: center;
   background: #eef2f5;
   color: #4b5563;
   font-size: 12px;
@@ -3453,12 +3454,18 @@ input:focus {
 .ov-sl.none { font-size: 12px; font-weight: 700; color: #b54708; background: #fffaeb; padding: 3px 9px; border-radius: 999px; }
 .ov-sl.zero { color: #98a2b3; }
 .ov-date { color: #65717e; font-size: 13px; white-space: nowrap; }
-.ov-date-sync { display: grid; gap: 5px; min-width: 0; }
-.ov-sync-results { display: grid; gap: 2px; max-width: 260px; }
-.ov-sync-status { font-size: 11px; line-height: 1.35; overflow-wrap: anywhere; }
+.ov-status-cell { display: flex; flex-direction: column; min-width: 0; }
+.ov-sync-results { display: flex; flex-direction: column; gap: 3px; max-width: 100%; }
+.ov-sync-status { font-size: 11px; line-height: 1.35; overflow-wrap: anywhere; display: flex; flex-direction: column; gap: 1px; }
+.ov-sync-line { display: flex; align-items: baseline; gap: 4px; }
+.ov-sync-icon { font-weight: 700; flex-shrink: 0; font-size: 11px; }
 .ov-sync-status.success { color: #047857; }
 .ov-sync-status.skipped { color: #b45309; }
 .ov-sync-status.failed { color: #b42318; }
+.ov-sync-error-container { display: flex; flex-direction: column; gap: 1px; }
+.ov-sync-error-msg { font-size: 10.5px; color: #991b1b; margin-left: 14px; line-height: 1.25; word-break: break-word; }
+.ov-sync-detail-btn { background: none; border: none; padding: 0; font-size: 10px; color: #4338ca; text-decoration: underline; cursor: pointer; margin-left: 4px; }
+.ov-sync-detail-btn:hover { color: #312e81; }
 
 /* coming-soon placeholder */
 .ov-soon { display: grid; justify-items: start; gap: 12px; color: #475467; }
@@ -5378,7 +5385,8 @@ input:focus {
     text-transform: uppercase;
     color: #0f766e;
   }
-  /* shortlisted + received are secondary — hidden on the compact card */
+  /* shortlisted, received and status are secondary — hidden on the compact card */
   .ov-trow > :nth-child(4),
-  .ov-trow > :nth-child(5) { display: none; }
+  .ov-trow > :nth-child(5),
+  .ov-trow > :nth-child(6) { display: none; }
 }
