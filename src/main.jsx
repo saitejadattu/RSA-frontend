@@ -6153,6 +6153,7 @@ function InterviewReportsPanel({ adminToken, opportunityId }) {
                 {reused ? "Re-ran the existing session (no duplicate created) — " : ""}
                 Analysed {analysis.candidates_analyzed} candidate(s), extracted {analysis.questions_extracted} questions
                 {analysis.model ? ` · ${analysis.model}` : ""}
+                {analysis.message ? ` — ${analysis.message}` : ""}
               </span>
             </div>
           ) : null}
