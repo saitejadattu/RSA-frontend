@@ -1669,6 +1669,14 @@ function AdminDashboard({ adminToken, onLogout, route = [], navigate = () => {} 
   const [searchTerm, setSearchTerm] = useState("");
   const [sortBy, setSortBy] = useState("recent");
   const [filterByRole, setFilterByRole] = useState("all");
+  const [syncResults, setSyncResults] = useState({});
+
+  function handleOverviewImport(result) {
+    if (result?.opportunity_results) {
+      setSyncResults(Object.fromEntries(result.opportunity_results.map((item) => [item.opportunity_id, item])));
+    }
+    loadDashboard();
+  }
 
   function loadDashboard() {
     setLoading(true);
@@ -1863,6 +1871,8 @@ function AdminDashboard({ adminToken, onLogout, route = [], navigate = () => {} 
             placement={placement}
             reportsSummary={reportsSummary}
             recentOpportunities={sortedOpportunities}
+            syncResults={syncResults}
+            onImport={handleOverviewImport}
             searchTerm={searchTerm}
             setSearchTerm={setSearchTerm}
             sortBy={sortBy}
@@ -3172,7 +3182,7 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
 function AdminOverview({
   loading, summary, funnel, loss, actionCenter, placement, reportsSummary,
   recentOpportunities, searchTerm, setSearchTerm, sortBy, setSortBy,
-  adminToken, onRefresh, openCompany, navigate,
+  syncResults, onImport, adminToken, onRefresh, openCompany, navigate,
 }) {
   const [openingsOpen, setOpeningsOpen] = useState(true);
   const applied = funnel[0]?.n || 0;
@@ -3199,7 +3209,7 @@ function AdminOverview({
         </button>
       </header>
 
-      <AddCompaniesPanel adminToken={adminToken} onImported={onRefresh} />
+      <AddCompaniesPanel adminToken={adminToken} onImported={onImport} />
 
       {/* <section className="ov-card">
         <div className="ov-card-head">
@@ -3315,7 +3325,10 @@ function AdminOverview({
                       </div>
                       <span className="ov-applied">{o.application_count ?? 0}</span>
                       <ShortlistCell applied={o.application_count ?? 0} shortlisted={o.shortlists_count ?? 0} />
-                      <span className="ov-date">{formatDate(o.opportunity_received_at)}</span>
+                      <div className="ov-date-sync">
+                        <span className="ov-date">{formatDate(o.opportunity_received_at)}</span>
+                        {syncResults?.[o.id] ? <OpportunitySyncStatus result={syncResults[o.id]} /> : null}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -3328,6 +3341,21 @@ function AdminOverview({
       </section>
     </div>
   );
+}
+
+function OpportunitySyncStatus({ result }) {
+  const stage = (label, item) => {
+    if (!item) return null;
+    const isSuccess = item.status === "SUCCESS";
+    const isSkipped = item.status === "SKIPPED";
+    return (
+      <span className={`ov-sync-status ${isSuccess ? "success" : isSkipped ? "skipped" : "failed"}`}>
+        {isSuccess ? "✓" : isSkipped ? "⚠" : "✗"} {label} {isSuccess ? "synced" : isSkipped ? "skipped" : "failed"}
+        {!isSuccess ? ` · ${item.reason || item.error || "Needs attention"}` : null}
+      </span>
+    );
+  };
+  return <div className="ov-sync-results">{stage("Response", result.response)}{stage("Shortlist", result.shortlist)}</div>;
 }
 
 /* ------------------------------ Analytics ------------------------------ */
@@ -4500,6 +4528,12 @@ const sheetApi = {
       method: "POST",
       adminToken,
     }),
+  incremental: (adminToken, url) =>
+    apiRequest("/admin/sync/incremental", {
+      method: "POST",
+      adminToken,
+      body: { url },
+    }),
   deleteOpportunity: (adminToken, opportunityId, reason) =>
     apiRequest(`/admin/opportunities/${opportunityId}`, {
       method: "DELETE",
@@ -4872,6 +4906,8 @@ function AddCompaniesPanel({ adminToken, onImported }) {
   const [applied, setApplied] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [syncMode, setSyncMode] = useState("full");
+  const [confirmMode, setConfirmMode] = useState(null);
 
   function reset() {
     setPreview(null);
@@ -4929,7 +4965,43 @@ function AddCompaniesPanel({ adminToken, onImported }) {
     }
   }
 
+  async function runIncremental() {
+    setBusy(true);
+    setError("");
+    try {
+      const result = await sheetApi.incremental(adminToken, url.trim());
+      setApplied({ incremental: true, result });
+      onImported?.(result);
+    } catch (err) {
+      setError(`Incremental sync failed. ${err.message || "Please check the sync details."}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function requestSync() {
+    if (!url.trim() || busy) return;
+    setConfirmMode(syncMode);
+  }
+
+  async function confirmSync() {
+    const mode = confirmMode;
+    setConfirmMode(null);
+    if (mode === "incremental") {
+      await runIncremental();
+    } else {
+      await runUrl(false);
+    }
+  }
+
   const counts = preview?.counts || {};
+  const incrementalResults = applied?.incremental ? (applied.result?.opportunity_results || []) : [];
+  const responseSynced = incrementalResults.filter((item) => item.response?.status === "SUCCESS").length;
+  const responseSkipped = incrementalResults.filter((item) => item.response?.status === "SKIPPED").length;
+  const responseFailed = incrementalResults.filter((item) => item.response?.status === "FAILED").length;
+  const shortlistSynced = incrementalResults.filter((item) => item.shortlist?.status === "SUCCESS").length;
+  const shortlistSkipped = incrementalResults.filter((item) => item.shortlist?.status === "SKIPPED").length;
+  const shortlistFailed = incrementalResults.filter((item) => item.shortlist?.status === "FAILED").length;
 
   return (
     <div className="panel wide">
@@ -4959,15 +5031,51 @@ function AddCompaniesPanel({ adminToken, onImported }) {
                 value={url}
                 onChange={(event) => setUrl(event.target.value)}
               />
-              <button
-                className="primary-button"
-                type="button"
-                disabled={!url.trim() || busy}
-                onClick={() => runUrl(false)}
-              >
-                {busy && fromUrl ? <Loader2 className="spin" size={18} /> : <RefreshCw size={18} />}
-                Pull from sheet
+            </div>
+          ) : null}
+
+          <div className="rsa-global-sync">
+            <div>
+              <h3>Sync</h3>
+              <p className="rsa-hint">Fetch the complete Master Sheet or pull only newly added data across all opportunities.</p>
+            </div>
+            <div className="rsa-global-sync-controls">
+              <select aria-label="Sync Mode" value={syncMode} onChange={(event) => setSyncMode(event.target.value)} disabled={busy}>
+                <option value="full">Fetch entire sheet data</option>
+                <option value="incremental">Pull only newly added data</option>
+              </select>
+              <button className="rsa-sync-btn" type="button" onClick={requestSync} disabled={!url.trim() || busy}>
+                {busy ? <Loader2 className="spin" size={15} /> : <RefreshCw size={15} />}
+                {busy ? "Syncing..." : "Pull & Sync"}
               </button>
+            </div>
+          </div>
+
+          {busy && syncMode === "incremental" ? (
+            <div className="sync-progress" aria-live="polite">
+              <strong>Sync Progress</strong>
+              <span>● Master Sheet processing</span>
+              <span>● Processing newly discovered opportunities</span>
+              <span>● Response and Shortlist imports run in dependency order</span>
+            </div>
+          ) : null}
+
+          {confirmMode ? (
+            <div className="sync-confirm-backdrop" role="presentation">
+              <section className="sync-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="sync-confirm-title">
+                <h2 id="sync-confirm-title">
+                  {confirmMode === "full" ? "Fetch Entire Sheet" : "Pull Newly Added Data"}
+                </h2>
+                <p>
+                  {confirmMode === "full"
+                    ? "This will fetch and compare the complete Master Sheet. This may take longer than an incremental sync. Continue?"
+                    : "This will check for newly added opportunities and sync their available response and shortlist data. Continue?"}
+                </p>
+                <div className="sync-confirm-actions">
+                  <button type="button" className="back-button" onClick={() => setConfirmMode(null)}>Cancel</button>
+                  <button type="button" className="primary-button" onClick={confirmSync}>Confirm &amp; Pull</button>
+                </div>
+              </section>
             </div>
           ) : null}
 
@@ -4977,11 +5085,30 @@ function AddCompaniesPanel({ adminToken, onImported }) {
             <div className="status success" style={{ marginBottom: 12 }}>
               <BadgeCheck size={18} />
               <span>
-                Done — {applied.counts.companies_new} new compan
+                {applied.incremental
+                  ? `Incremental sync completed. Opportunities added: ${applied.result?.master?.created ?? 0}. Opportunities updated: ${applied.result?.master?.updated ?? 0}. Response synced: ${responseSynced}, skipped: ${responseSkipped}, failed: ${responseFailed}. Shortlist synced: ${shortlistSynced}, skipped: ${shortlistSkipped}, failed: ${shortlistFailed}.`
+                  : `Done — ${applied.counts.companies_new} new compan
                 {applied.counts.companies_new === 1 ? "y" : "ies"},{" "}
                 {applied.counts.opportunities_to_create} opening(s) created,{" "}
-                {applied.counts.opportunities_to_update} updated.
+                {applied.counts.opportunities_to_update} updated.`}
               </span>
+            </div>
+          ) : null}
+
+          {applied?.incremental && applied?.result?.opportunity_results?.length ? (
+            <div className="sync-results">
+              <h3>Sync Results</h3>
+              {applied.result.opportunity_results.map((item) => (
+                <div className={`sync-result ${item.response?.status === "FAILED" || item.shortlist?.status === "FAILED" ? "attention" : ""}`} key={item.opportunity_id}>
+                  <strong>{item.is_new ? "New opportunity" : "Existing opportunity"}: {item.opportunity_id}</strong>
+                  <span className={item.response?.status === "SUCCESS" ? "success-text" : "attention-text"}>
+                    {item.response?.status === "SUCCESS" ? "✓ Response imported" : item.response?.status === "SKIPPED" ? `⚠ ${item.response.reason}` : `✗ Response import failed: ${item.response?.error || "unknown error"}`}
+                  </span>
+                  <span className={item.shortlist?.status === "SUCCESS" ? "success-text" : item.shortlist?.status === "SKIPPED" ? "muted" : "attention-text"}>
+                    {item.shortlist?.status === "SUCCESS" ? "✓ Shortlist imported" : item.shortlist?.status === "SKIPPED" ? `⊘ Shortlist skipped: ${item.shortlist.reason}` : `✗ Shortlist import failed: ${item.shortlist?.error || "unknown error"}`}
+                  </span>
+                </div>
+              ))}
             </div>
           ) : null}
 
@@ -5330,10 +5457,6 @@ function SheetImportPanel({ adminToken, opportunityId, opportunity, onImported }
             <button type="button" className="rsa-link-btn" onClick={toggleLinks} disabled={busy}>
               <Link2 size={15} />
               Sheet links
-            </button>
-            <button type="button" className="rsa-sync-btn" onClick={fetchResponseSheet} disabled={busy}>
-              {fetchingResponse ? <Loader2 className="spin" size={15} /> : <RefreshCw size={15} />}
-              Fetch Data
             </button>
           </div>
         ) : null}

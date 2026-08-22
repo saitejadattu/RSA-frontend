@@ -35,37 +35,9 @@ input {
   }
 }
 
-.auth-page {
-  min-height: 100vh;
-  display: grid;
-  place-items: center;
-  padding: 24px;
-  background:
-    linear-gradient(rgba(244, 246, 248, 0.88), rgba(244, 246, 248, 0.88)),
-    url("https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=1800&q=80") center/cover;
-}
-
-.auth-panel {
-  width: min(460px, 100%);
-  background: rgba(255, 255, 255, 0.96);
-  border: 1px solid #d8dde3;
-  border-radius: 8px;
-  box-shadow: 0 20px 60px rgba(35, 43, 52, 0.18);
-  padding: 28px;
-}
-
-.auth-brand {
-  display: flex;
-  gap: 14px;
-  align-items: flex-start;
-  margin-bottom: 28px;
-}
-
 .brand-mark,
 .metric span,
 .avatar {
-  display: grid;
-  place-items: center;
   background: #0f766e;
   color: #fff;
 }
@@ -2261,9 +2233,174 @@ input:focus {
 
 .rsa-title-actions {
   margin-left: auto;
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.rsa-global-sync {
+  margin: 16px 0;
+  padding: 16px 0 4px;
+  border-top: 1px solid #e5eaf0;
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.rsa-global-sync h3 {
+  margin: 0 0 4px;
+  font-size: 16px;
+}
+
+.rsa-global-sync .rsa-hint {
+  margin-bottom: 0;
+}
+
+.rsa-global-sync-controls {
+  display: flex;
+  align-items: end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.rsa-global-sync-controls select {
+  min-height: 36px;
+  min-width: 190px;
+  border: 1px solid #cbd3dc;
+  border-radius: 6px;
+  background: #fff;
+  color: #202124;
+  padding: 0 28px 0 9px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.sync-progress,
+.sync-results {
+  display: grid;
+  gap: 8px;
+  margin: 14px 0;
+  padding: 14px;
+  border: 1px solid #d7e8e5;
+  border-radius: 8px;
+  background: #f2f7f6;
+  color: #344054;
+  font-size: 13px;
+}
+
+.sync-progress strong,
+.sync-results h3 {
+  color: #0f766e;
+}
+
+.sync-results h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.sync-result {
+  display: grid;
+  gap: 4px;
+  padding: 10px 0;
+  border-top: 1px solid #d7e8e5;
+}
+
+.sync-result.attention {
+  color: #92400e;
+}
+
+.success-text {
+  color: #047857;
+}
+
+.attention-text {
+  color: #b45309;
+}
+
+.sync-confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(16, 24, 40, 0.45);
+}
+
+.sync-confirm-dialog {
+  width: min(460px, 100%);
+  display: grid;
+  gap: 12px;
+  padding: 22px;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 20px 50px rgba(16, 24, 40, 0.25);
+}
+
+.sync-confirm-dialog h2 {
+  font-size: 20px;
+}
+
+.sync-confirm-dialog p {
+  color: #475467;
+  line-height: 1.5;
+}
+
+.sync-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 9px;
+  margin-top: 8px;
+}
+
+@media (max-width: 680px) {
+  .rsa-global-sync {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .rsa-global-sync-controls {
+    align-items: stretch;
+  }
+
+  .rsa-global-sync-controls select,
+  .rsa-global-sync-controls .rsa-sync-btn {
+    flex: 1 1 180px;
+  }
+}
+
+.rsa-sync-mode {
+  display: grid;
+  gap: 3px;
+  min-width: 190px;
+}
+
+.rsa-sync-mode span {
+  color: #65717e;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.rsa-sync-mode select {
+  min-height: 36px;
+  border: 1px solid #cbd3dc;
+  border-radius: 6px;
+  background: #fff;
+  color: #202124;
+  padding: 0 28px 0 9px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.rsa-sync-mode select:focus {
+  outline: none;
+  border-color: #0f766e;
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.12);
 }
 
 .rsa-link-btn {
@@ -3316,6 +3453,12 @@ input:focus {
 .ov-sl.none { font-size: 12px; font-weight: 700; color: #b54708; background: #fffaeb; padding: 3px 9px; border-radius: 999px; }
 .ov-sl.zero { color: #98a2b3; }
 .ov-date { color: #65717e; font-size: 13px; white-space: nowrap; }
+.ov-date-sync { display: grid; gap: 5px; min-width: 0; }
+.ov-sync-results { display: grid; gap: 2px; max-width: 260px; }
+.ov-sync-status { font-size: 11px; line-height: 1.35; overflow-wrap: anywhere; }
+.ov-sync-status.success { color: #047857; }
+.ov-sync-status.skipped { color: #b45309; }
+.ov-sync-status.failed { color: #b42318; }
 
 /* coming-soon placeholder */
 .ov-soon { display: grid; justify-items: start; gap: 12px; color: #475467; }
