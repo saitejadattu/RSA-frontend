@@ -2750,7 +2750,7 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
       ) : null}
 
       {/* Half-finished / not-yet-run transcript extractions: resume each on its own. */}
-      {pending.length ? (
+      {/* {pending.length ? (
         <div className="rep-pending-box">
           <button type="button" className="rep-pending-head" onClick={() => setShowPending((v) => !v)}>
             {showPending ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
@@ -2772,7 +2772,7 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
             </div>
           ) : null}
         </div>
-      ) : null}
+      ) : null} */}
 
       {!loading && reports.length ? (
         <div className="rep-filters">
