@@ -446,7 +446,7 @@ function UnifiedLogin({ onStudent, onAdmin }) {
               <input
                 value={identifier}
                 onChange={(event) => setIdentifier(event.target.value)}
-                placeholder="Mobile number (student) or email (admin)"
+                placeholder="Mobile number"
                 autoComplete="username"
                 required
               />
