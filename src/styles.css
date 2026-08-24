@@ -55,29 +55,87 @@ p {
   margin: 0;
 }
 
-.auth-brand h1 {
-  font-size: 24px;
-  line-height: 1.15;
+/* ----------------------------- Authentication ----------------------------- */
+.auth-page {
+  min-height: 100vh;
+  width: 100%;
+  display: grid;
+  place-items: center;
+  padding: 32px 20px;
+  background: #f4f6f8;
 }
 
-.auth-brand p,
-.reset-header p,
-.empty-state p,
-.profile-list span,
-.metric p,
-.eyebrow {
-  color: #65717e;
+.auth-panel {
+  width: min(100%, 430px);
+  padding: 32px;
+  background: #fff;
+  border: 1px solid #dfe4ea;
+  border-radius: 16px;
+  box-shadow: 0 14px 40px rgba(15, 23, 42, 0.08);
+}
+
+.auth-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  margin-bottom: 28px;
+}
+
+.auth-brand .brand-mark {
+  width: 52px;
+  height: 52px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  margin-bottom: 14px;
+  box-shadow: 0 8px 18px rgba(15, 118, 110, 0.16);
+}
+
+.auth-brand h1 {
+  font-size: 26px;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
 }
 
 .auth-brand p {
   margin-top: 8px;
   font-size: 14px;
   line-height: 1.5;
+  color: #65717e;
 }
 
 .auth-form {
   display: grid;
-  gap: 16px;
+  gap: 18px;
+}
+
+.auth-form label {
+  display: grid;
+  gap: 7px;
+}
+
+.auth-form label > span {
+  color: #344054;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.auth-form .primary-button {
+  width: 100%;
+  margin-top: 2px;
+}
+
+.auth-panel .status {
+  margin-top: -2px;
+}
+
+.reset-header p,
+.empty-state p,
+.profile-list span,
+.metric p,
+.eyebrow {
+  color: #65717e;
 }
 
 label {
