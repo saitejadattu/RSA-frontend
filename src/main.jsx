@@ -122,13 +122,31 @@ async function apiRequest(path, { method = "GET", body, token, adminToken } = {}
     if (response.status === 401) {
       window.dispatchEvent(new CustomEvent("auth:expired"));
     }
-    const err = new Error(data?.detail || data?.message || "Something went wrong");
+    const err = new Error(formatApiError(data) || "Something went wrong");
     err.data = data;
     err.status = response.status;
     throw err;
   }
 
   return data;
+}
+
+function formatApiError(data) {
+  const detail = data?.detail;
+  if (Array.isArray(detail)) {
+    const lines = detail.map((item) => {
+      const location = Array.isArray(item?.loc)
+        ? item.loc.filter((part) => part !== "body").map((part, index, parts) =>
+          typeof part === "number" ? `[${part}]` : index && typeof parts[index - 1] === "number" ? `.${part}` : String(part)
+        ).join("")
+        : "Request";
+      return `${location || "Request"}: ${item?.msg || "Invalid value"}`;
+    });
+    return `Manual analysis validation failed:\n${lines.map((line) => `• ${line}`).join("\n")}`;
+  }
+  if (typeof detail === "string") return detail;
+  if (typeof data?.message === "string") return data.message;
+  return "";
 }
 
 // Remember scroll positions per route — both the window AND any inner scroll
@@ -449,7 +467,7 @@ function UnifiedLogin({ onStudent, onAdmin }) {
               <input
                 value={identifier}
                 onChange={(event) => setIdentifier(event.target.value)}
-                placeholder="Mobile number (student) or email (admin)"
+                placeholder="Mobile number"
                 autoComplete="username"
                 required
               />
@@ -4518,6 +4536,10 @@ const rsaApi = {
     apiRequest(`/interview-sessions/${sessionId}/analyze`, { method: "POST", adminToken }),
   reports: (adminToken, sessionId) =>
     apiRequest(`/interview-sessions/${sessionId}/reports`, { adminToken }),
+  manualPreview: (adminToken, sessionId, body) =>
+    apiRequest(`/interview-sessions/${sessionId}/manual-analysis/preview`, { method: "POST", adminToken, body }),
+  manualSave: (adminToken, sessionId, body) =>
+    apiRequest(`/interview-sessions/${sessionId}/manual-analysis`, { method: "POST", adminToken, body }),
   setVisibility: (adminToken, reportId, visible) =>
     apiRequest(`/admin/reports/${reportId}/visibility`, {
       method: "PATCH",
@@ -5969,6 +5991,9 @@ function InterviewReportsPanel({ adminToken, opportunityId }) {
   const [error, setError] = useState("");
   const [tab, setTab] = useState("reports");
   const [reused, setReused] = useState(false);
+  const [manualText, setManualText] = useState("");
+  const [manualPayload, setManualPayload] = useState(null);
+  const [manualPreview, setManualPreview] = useState(null);
 
   async function refreshSide() {
     try {
@@ -6024,9 +6049,79 @@ function InterviewReportsPanel({ adminToken, opportunityId }) {
       });
       setReused(Boolean(confirmed.reused));
       setSessionId(confirmed.session_id);
-      const result = await rsaApi.analyze(adminToken, confirmed.session_id);
+      setStage("choose");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runAutomatedAnalysis() {
+    if (!sessionId || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      const result = await rsaApi.analyze(adminToken, sessionId);
       setAnalysis(result);
-      await loadReports(confirmed.session_id);
+      await loadReports(sessionId);
+      await refreshSide();
+      setStage("done");
+      setTab("reports");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function startManualAnalysis() {
+    setError("");
+    setManualText("");
+    setManualPayload(null);
+    setManualPreview(null);
+    setStage("manual");
+  }
+
+  function parseManualPayload() {
+    try {
+      const parsed = JSON.parse(manualText);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("Top-level JSON must be an object.");
+      return parsed;
+    } catch (err) {
+      setError(`Invalid manual analysis JSON: ${err.message}`);
+      return null;
+    }
+  }
+
+  async function previewManual() {
+    const payload = parseManualPayload();
+    if (!payload || !sessionId || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      setManualPayload(payload);
+      setManualPreview(await rsaApi.manualPreview(adminToken, sessionId, payload));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveManual() {
+    if (!manualPayload || !sessionId || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      const result = await rsaApi.manualSave(adminToken, sessionId, manualPayload);
+      setAnalysis({
+        ...result,
+        manual: true,
+        candidates_analyzed: result.candidate_reports_saved,
+        questions_extracted: result.questions_saved,
+      });
+      await loadReports(sessionId);
       await refreshSide();
       setStage("done");
       setTab("reports");
@@ -6154,6 +6249,71 @@ function InterviewReportsPanel({ adminToken, opportunityId }) {
           onConfirm={handleConfirm}
           busy={busy}
         />
+      ) : null}
+
+      {stage === "choose" ? (
+        <div className="rsa-analysis-choice">
+          <h3 className="detail-subhead">How do you want to analyze this interview?</h3>
+          <p className="rsa-hint">The transcript and confirmed participants are saved. Choose how to create the questions and feedback.</p>
+          <div className="rsa-analysis-choice-actions">
+            <button type="button" className="back-button" onClick={startManualAnalysis} disabled={busy}>
+              <Pencil size={16} /> Manual Analysis
+            </button>
+            <button type="button" className="primary-button" onClick={runAutomatedAnalysis} disabled={busy}>
+              {busy ? <Loader2 className="spin" size={18} /> : <Sparkles size={18} />}
+              Automated AI
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {stage === "manual" ? (
+        <div className="rsa-manual-analysis">
+          <h3 className="detail-subhead">Manual Interview Analysis</h3>
+          <p className="rsa-hint">Paste the structured JSON prepared from this confirmed transcript. Nothing is saved until you confirm the preview.</p>
+          <div className="rsa-manual-participants">
+            <strong>Interview participants</strong>
+            {(proposal?.shortlisted_students || []).filter((student) => (proposal?.speaker_map || []).some((entry) => entry.role === "student" && String(entry.student_id) === String(student.student_id))).map((student) => (
+              <span key={student.student_id}><CheckCircle2 size={15} /> {student.name || "Student"}</span>
+            ))}
+          </div>
+          {!manualPreview ? (
+            <>
+              <textarea className="rsa-textarea rsa-manual-textarea" value={manualText} onChange={(event) => setManualText(event.target.value)} spellCheck={false} placeholder={'{"candidates": [], "questions": [], "company_expectations": {}}'} />
+              <div className="rsa-actions">
+                <button type="button" className="back-button" onClick={() => setStage("choose")} disabled={busy}>Back</button>
+                <button type="button" className="primary-button" onClick={previewManual} disabled={busy || !manualText.trim()}>
+                  {busy ? <Loader2 className="spin" size={18} /> : <Eye size={18} />} Validate &amp; Preview
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="rsa-manual-preview">
+                <strong>Manual Analysis Preview</strong>
+                <span>Candidates: {manualPreview.candidates}</span>
+                <span>Questions: {manualPreview.questions}</span>
+                {manualPreview.anonymous_questions ? <span>Questions saved as anonymous: {manualPreview.anonymous_questions}</span> : null}
+                <span>Company feedback: {manualPreview.company_expectations ? "Yes" : "No"}</span>
+                {manualPreview.categories?.map((category, index) => (
+                  <span key={`${category.input}-${index}`}>Category: {category.input} → {category.normalized} ({category.status})</span>
+                ))}
+                {manualPreview.question_types?.map((type, index) => (
+                  <span key={`${type.input}-${index}`}>Question type: {type.input} → {type.normalized} ({type.status})</span>
+                ))}
+                {manualPreview.candidate_preview?.map((candidate) => (
+                  <span key={candidate.name}>{candidate.name}: {candidate.mapping_status} · Application {candidate.application} · Report {candidate.report} · {candidate.questions} question(s)</span>
+                ))}
+              </div>
+              <div className="rsa-actions">
+                <button type="button" className="back-button" onClick={() => setManualPreview(null)} disabled={busy}>Back</button>
+                <button type="button" className="primary-button" onClick={saveManual} disabled={busy}>
+                  {busy ? <Loader2 className="spin" size={18} /> : <BadgeCheck size={18} />} Save analysis
+                </button>
+              </div>
+            </>
+          )}
+        </div>
       ) : null}
 
       {stage === "done" ? (

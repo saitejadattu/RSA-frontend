@@ -2653,6 +2653,47 @@ input:focus {
   white-space: nowrap;
 }
 
+.rsa-analysis-choice,
+.rsa-manual-analysis {
+  display: grid;
+  gap: 12px;
+}
+
+.rsa-analysis-choice-actions,
+.rsa-manual-participants,
+.rsa-manual-preview {
+  display: grid;
+  gap: 8px;
+}
+
+.rsa-manual-participants,
+.rsa-manual-preview {
+  padding: 12px 14px;
+  border: 1px solid #e5eaf0;
+  border-radius: 8px;
+  background: #f7f9fb;
+}
+
+.rsa-manual-participants span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #0f766e;
+  font-size: 13px;
+}
+
+.rsa-manual-textarea {
+  min-height: 300px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.rsa-manual-preview span {
+  font-size: 13px;
+  color: #475467;
+}
+
 @media (max-width: 900px) {
   .rsa-cols,
   .rsa-map-row,
