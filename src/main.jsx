@@ -122,10 +122,31 @@ async function apiRequest(path, { method = "GET", body, token, adminToken } = {}
     if (response.status === 401) {
       window.dispatchEvent(new CustomEvent("auth:expired"));
     }
-    throw new Error(data?.detail || "Something went wrong");
+    const err = new Error(formatApiError(data) || "Something went wrong");
+    err.data = data;
+    err.status = response.status;
+    throw err;
   }
 
   return data;
+}
+
+function formatApiError(data) {
+  const detail = data?.detail;
+  if (Array.isArray(detail)) {
+    const lines = detail.map((item) => {
+      const location = Array.isArray(item?.loc)
+        ? item.loc.filter((part) => part !== "body").map((part, index, parts) =>
+          typeof part === "number" ? `[${part}]` : index && typeof parts[index - 1] === "number" ? `.${part}` : String(part)
+        ).join("")
+        : "Request";
+      return `${location || "Request"}: ${item?.msg || "Invalid value"}`;
+    });
+    return `Manual analysis validation failed:\n${lines.map((line) => `• ${line}`).join("\n")}`;
+  }
+  if (typeof detail === "string") return detail;
+  if (typeof data?.message === "string") return data.message;
+  return "";
 }
 
 // Remember scroll positions per route — both the window AND any inner scroll
@@ -446,7 +467,7 @@ function UnifiedLogin({ onStudent, onAdmin }) {
               <input
                 value={identifier}
                 onChange={(event) => setIdentifier(event.target.value)}
-                placeholder="Mobile number"
+                placeholder="Mobile number (student) or email (admin)"
                 autoComplete="username"
                 required
               />
@@ -1669,22 +1690,26 @@ function AdminDashboard({ adminToken, onLogout, route = [], navigate = () => {} 
   const [searchTerm, setSearchTerm] = useState("");
   const [sortBy, setSortBy] = useState("recent");
   const [filterByRole, setFilterByRole] = useState("all");
-  const [syncResults, setSyncResults] = useState({});
+  const dashboardFetchId = useRef(0);
 
   function handleOverviewImport(result) {
-    if (result?.opportunity_results) {
-      setSyncResults(Object.fromEntries(result.opportunity_results.map((item) => [item.opportunity_id, item])));
-    }
-    loadDashboard();
+    return loadDashboard();
   }
 
   function loadDashboard() {
+    const fetchId = ++dashboardFetchId.current;
     setLoading(true);
     setError("");
-    apiRequest("/admin/dashboard", { adminToken })
-      .then(setDashboard)
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
+    return apiRequest("/admin/dashboard", { adminToken })
+      .then((data) => {
+        if (fetchId === dashboardFetchId.current) setDashboard(data);
+      })
+      .catch((err) => {
+        if (fetchId === dashboardFetchId.current) setError(err.message);
+      })
+      .finally(() => {
+        if (fetchId === dashboardFetchId.current) setLoading(false);
+      });
   }
 
   function loadStudents() {
@@ -1871,7 +1896,6 @@ function AdminDashboard({ adminToken, onLogout, route = [], navigate = () => {} 
             placement={placement}
             reportsSummary={reportsSummary}
             recentOpportunities={sortedOpportunities}
-            syncResults={syncResults}
             onImport={handleOverviewImport}
             searchTerm={searchTerm}
             setSearchTerm={setSearchTerm}
@@ -2208,6 +2232,7 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
   const [gen, setGen] = useState(null); // {done,total,current} while generating
   const [genOne, setGenOne] = useState(null); // session id being (re)generated on its own
   const [filter, setFilter] = useState("all"); // all | pending | published (report publish state)
+  const [reportSearch, setReportSearch] = useState("");
   const [monthFilter, setMonthFilter] = useState("all"); // all | YYYY-MM (interview date month)
   const [companyFilter, setCompanyFilter] = useState("all");
   const [feedbackView, setFeedbackView] = useState("company"); // company | student
@@ -2527,8 +2552,10 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
     const byMonth = monthFilter === "all"
       ? byPublishState
       : byPublishState.filter((report) => monthKeyForReport(report) === monthFilter);
-    return companyFilter === "all" ? byMonth : byMonth.filter((report) => report.company === companyFilter);
-  }, [reports, filter, monthFilter, companyFilter]);
+    const byCompany = companyFilter === "all" ? byMonth : byMonth.filter((report) => report.company === companyFilter);
+    const search = reportSearch.trim().toLowerCase();
+    return search ? byCompany.filter((report) => (report.company || "").toLowerCase().includes(search)) : byCompany;
+  }, [reports, filter, monthFilter, companyFilter, reportSearch]);
 
   const studentCompanies = useMemo(() => [...new Set(reports.map((r) => r.company).filter(Boolean))]
     .sort((a, b) => a.localeCompare(b)), [reports]);
@@ -2744,7 +2771,7 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
       ) : null}
 
       {/* Half-finished / not-yet-run transcript extractions: resume each on its own. */}
-      {pending.length ? (
+      {/* {pending.length ? (
         <div className="rep-pending-box">
           <button type="button" className="rep-pending-head" onClick={() => setShowPending((v) => !v)}>
             {showPending ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
@@ -2766,10 +2793,19 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
             </div>
           ) : null}
         </div>
-      ) : null}
+      ) : null} */}
 
       {!loading && reports.length ? (
         <div className="rep-filters">
+          <label className="student-search rep-toolbar-search">
+            <span>Search company</span>
+            <input
+              value={reportSearch}
+              onChange={(event) => { setReportSearch(event.target.value); setOpenCompany(null); setOpenStudentId(null); }}
+              placeholder="Search company..."
+              aria-label="Search interview reports by company"
+            />
+          </label>
           <div className="rep-toolbar-status" aria-label="Report status filter">
             <span className="rep-filter-label">Status</span>
             <button type="button" className={`rep-chip ${filter === "all" ? "on" : ""}`} onClick={() => setFilter("all")}>
@@ -2853,7 +2889,7 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
             {studentReports.length !== reports.length ? <p className="ov-sub">Filtered from {reports.length} available reports</p> : null}
           </div>
           {!studentReports.length ? (
-            <div className="empty-state compact"><p>No student feedback matches these filters.</p></div>
+            <div className="empty-state compact"><p>{reportSearch.trim() ? "No interview reports found." : "No student feedback matches these filters."}</p></div>
           ) : (
             <>
               <div className="student-export-actions">
@@ -3021,7 +3057,7 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
             {filter === "pending" ? "No pending reports — everything is published."
               : filter === "published" ? "No published reports yet."
               : monthFilter !== "all" ? "No interview reports for this month."
-              : "No interview reports yet."}
+              : reportSearch.trim() ? "No interview reports found." : "No interview reports yet."}
           </p>
         </div>
       ) : (
@@ -3182,7 +3218,7 @@ function AdminReportsView({ adminToken, reportsSummary = {} }) {
 function AdminOverview({
   loading, summary, funnel, loss, actionCenter, placement, reportsSummary,
   recentOpportunities, searchTerm, setSearchTerm, sortBy, setSortBy,
-  syncResults, onImport, adminToken, onRefresh, openCompany, navigate,
+  onImport, adminToken, onRefresh, openCompany, navigate,
 }) {
   const [openingsOpen, setOpeningsOpen] = useState(true);
   const applied = funnel[0]?.n || 0;
@@ -3243,7 +3279,7 @@ function AdminOverview({
       </section> */}
 
       <div className="">
-        <section className="ov-card">
+        {/* <section className="ov-card">
           <h2>Where we lose people</h2>
           <p className="ov-muted">Slices of the {fmt(applied)} applications. Neither is a rejection, and they can overlap.</p>
           <div className="ov-loss">
@@ -3251,7 +3287,7 @@ function AdminOverview({
             <LossItem label="Awaiting company response" n={loss.awaiting} applied={applied} color="#f59e0b" note="Still at Applied with no decision recorded. Stalled, not lost — this is the pile the action queue chases." />
             <LossItem label="Not shortlisted — resume screen" n={loss.not_shortlisted} applied={applied} color="#b42318" note="A resume-stage pass with the company's note attached where they gave one — never a failed interview." />
           </div>
-        </section>
+        </section> */}
 
         {/* <section className="ov-card">
           <div className="ov-card-head-row">
@@ -3312,11 +3348,16 @@ function AdminOverview({
             ) : recentOpportunities.length ? (
               <div className="ov-table-scroll" data-scroll-key="ov-openings">
                 <div className="ov-table">
-                  <div className="ov-thead"><span>Company</span><span>Role</span><span>Applied</span><span>Shortlisted</span><span>Received</span></div>
+                  <div className="ov-thead"><span>Company</span><span>Role</span><span>Applied</span><span>Shortlisted</span><span>Received</span><span>Status</span></div>
                   {recentOpportunities.map((o) => (
                     <div className="ov-trow" key={o.id}>
                       <div className="ov-cell">
-                        <button type="button" className="link-button" onClick={() => openCompany(o.company)} title="View company detail">{o.company?.name || "Company"}</button>
+                        <button type="button" className="link-button" onClick={() => openCompany(o.company)} title="View company detail">
+                          {o.company?.name || "Company"}
+                          {isNoStudentEligibleStatus(o.student_side_status) ? (
+                            <span className="ov-no-student-star" aria-label="No Student Eligible">*</span>
+                          ) : null}
+                        </button>
                         <span>{o.location || "—"}</span>
                       </div>
                       <div className="ov-cell">
@@ -3324,11 +3365,12 @@ function AdminOverview({
                         <span>{o.tech_stack || o.must_have_skills || "—"}</span>
                       </div>
                       <span className="ov-applied">{o.application_count ?? 0}</span>
-                      <ShortlistCell applied={o.application_count ?? 0} shortlisted={o.shortlists_count ?? 0} />
-                      <div className="ov-date-sync">
-                        <span className="ov-date">{formatDate(o.opportunity_received_at)}</span>
-                        {syncResults?.[o.id] ? <OpportunitySyncStatus result={syncResults[o.id]} /> : null}
-                      </div>
+                      <ShortlistCell applied={o.application_count ?? 0} shortlisted={Number(o.shortlists_count) || 0} />
+                      <span className="ov-date">{formatDate(o.opportunity_received_at)}</span>
+                      <SheetAvailabilityStatus
+                        studentResponseSheet={o.student_response_sheet}
+                        companySheet={o.company_sheet}
+                      />
                     </div>
                   ))}
                 </div>
@@ -3343,19 +3385,23 @@ function AdminOverview({
   );
 }
 
-function OpportunitySyncStatus({ result }) {
-  const stage = (label, item) => {
-    if (!item) return null;
-    const isSuccess = item.status === "SUCCESS";
-    const isSkipped = item.status === "SKIPPED";
-    return (
-      <span className={`ov-sync-status ${isSuccess ? "success" : isSkipped ? "skipped" : "failed"}`}>
-        {isSuccess ? "✓" : isSkipped ? "⚠" : "✗"} {label} {isSuccess ? "synced" : isSkipped ? "skipped" : "failed"}
-        {!isSuccess ? ` · ${item.reason || item.error || "Needs attention"}` : null}
-      </span>
-    );
-  };
-  return <div className="ov-sync-results">{stage("Response", result.response)}{stage("Shortlist", result.shortlist)}</div>;
+function SheetAvailabilityStatus({ studentResponseSheet, companySheet }) {
+  const hasResponse = Boolean(String(studentResponseSheet || "").trim());
+  const hasShortlist = Boolean(String(companySheet || "").trim());
+  const status = hasResponse && hasShortlist
+    ? { className: "available", label: "Sheets available" }
+    : hasResponse
+      ? { className: "response-only", label: "Response sheet only" }
+      : hasShortlist
+        ? { className: "shortlist-only", label: "Shortlist sheet only" }
+        : { className: "none", label: "No sheets" };
+
+  return (
+    <div className={`ov-sheet-availability ${status.className}`}>
+      <span className="ov-sheet-dot" aria-hidden="true" />
+      <span>{status.label}</span>
+    </div>
+  );
 }
 
 /* ------------------------------ Analytics ------------------------------ */
@@ -4490,6 +4536,10 @@ const rsaApi = {
     apiRequest(`/interview-sessions/${sessionId}/analyze`, { method: "POST", adminToken }),
   reports: (adminToken, sessionId) =>
     apiRequest(`/interview-sessions/${sessionId}/reports`, { adminToken }),
+  manualPreview: (adminToken, sessionId, body) =>
+    apiRequest(`/interview-sessions/${sessionId}/manual-analysis/preview`, { method: "POST", adminToken, body }),
+  manualSave: (adminToken, sessionId, body) =>
+    apiRequest(`/interview-sessions/${sessionId}/manual-analysis`, { method: "POST", adminToken, body }),
   setVisibility: (adminToken, reportId, visible) =>
     apiRequest(`/admin/reports/${reportId}/visibility`, {
       method: "PATCH",
@@ -4930,7 +4980,7 @@ function AddCompaniesPanel({ adminToken, onImported }) {
         setApplied(result);
         setPreview(null);
         setText("");
-        onImported?.();
+        await onImported?.(result);
       } else {
         setPreview(result);
         setApplied(null);
@@ -4953,7 +5003,7 @@ function AddCompaniesPanel({ adminToken, onImported }) {
       if (confirm) {
         setApplied(result);
         setPreview(null);
-        onImported?.();
+        await onImported?.(result);
       } else {
         setPreview(result);
         setApplied(null);
@@ -4971,9 +5021,14 @@ function AddCompaniesPanel({ adminToken, onImported }) {
     try {
       const result = await sheetApi.incremental(adminToken, url.trim());
       setApplied({ incremental: true, result });
-      onImported?.(result);
+      await onImported?.(result);
     } catch (err) {
-      setError(`Incremental sync failed. ${err.message || "Please check the sync details."}`);
+      const resultData = err.data;
+      if (resultData?.opportunity_results) {
+        setApplied({ incremental: true, result: resultData });
+        await onImported?.(resultData);
+      }
+      setError(`Incremental sync completed with failures. ${err.message || "Please check the sync details."}`);
     } finally {
       setBusy(false);
     }
@@ -5257,6 +5312,11 @@ function changedSinceImport(changedAt, importedAt) {
   return new Date(changedAt).getTime() > new Date(importedAt).getTime();
 }
 
+function isNoStudentEligibleStatus(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return normalized === "no student eligible" || normalized === "no student eligble";
+}
+
 /* --- Paste a response / shortlist sheet for this opening ----------- */
 function SheetImportPanel({ adminToken, opportunityId, opportunity, onImported }) {
   const [kind, setKind] = useState("responses");
@@ -5335,6 +5395,32 @@ function SheetImportPanel({ adminToken, opportunityId, opportunity, onImported }
       onImported?.();
     } catch (err) {
       setError(err.message);
+    } finally {
+      setFetchingResponse(false);
+      setBusy(false);
+    }
+  }
+
+  async function fetchAndSyncSheets() {
+    if (busy) return;
+    const hasResponseSheet = Boolean((opportunity?.student_response_sheet || "").trim());
+    const hasShortlistSheet = Boolean((opportunity?.company_sheet || "").trim());
+    if (!hasResponseSheet) {
+      setError("Response sheet URL missing. Add it via Sheet links or use the paste workflow.");
+      return;
+    }
+
+    setBusy(true);
+    setFetchingResponse(true);
+    reset();
+    try {
+      const result = hasShortlistSheet
+        ? await sheetApi.autoSyncResponse(adminToken, opportunityId)
+        : await sheetApi.sync(adminToken, opportunityId, "responses", true, true);
+      setApplied({ ...result, synced: true, responseOnly: !hasShortlistSheet });
+      await onImported?.(result);
+    } catch (err) {
+      setError(err.message || "Could not fetch the sheets.");
     } finally {
       setFetchingResponse(false);
       setBusy(false);
@@ -5454,6 +5540,20 @@ function SheetImportPanel({ adminToken, opportunityId, opportunity, onImported }
         <h2>Import sheet data</h2>
         {!inSync && !preview ? (
           <div className="rsa-title-actions">
+            <button
+              type="button"
+              className="rsa-sync-btn"
+              onClick={fetchAndSyncSheets}
+              disabled={busy || !(opportunity?.student_response_sheet || "").trim()}
+              title={
+                !(opportunity?.student_response_sheet || "").trim()
+                  ? "Response sheet URL missing"
+                  : "Fetch response sheet, then shortlist sheet"
+              }
+            >
+              {busy ? <Loader2 className="spin" size={15} /> : <RefreshCw size={15} />}
+              {busy ? "Fetching..." : (opportunity?.company_sheet || "").trim() ? "Fetch & Sync Sheets" : "Fetch Response Sheet"}
+            </button>
             <button type="button" className="rsa-link-btn" onClick={toggleLinks} disabled={busy}>
               <Link2 size={15} />
               Sheet links
@@ -5551,6 +5651,22 @@ function SheetImportPanel({ adminToken, opportunityId, opportunity, onImported }
       ) : null}
 
       {error ? <StatusMessage error={error} /> : null}
+
+      {!((opportunity?.student_response_sheet || "").trim()) ? (
+        <div className="rsa-warning" style={{ marginBottom: 12 }}>
+          <TriangleAlert size={16} />
+          <span>
+            Response sheet URL missing. Automatic response import is unavailable.
+            {((opportunity?.company_sheet || "").trim()) ? " Automatic shortlist sync is unavailable until the response stage succeeds." : ""}
+          </span>
+        </div>
+      ) : null}
+      {((opportunity?.student_response_sheet || "").trim()) && !((opportunity?.company_sheet || "").trim()) ? (
+        <div className="rsa-warning" style={{ marginBottom: 12 }}>
+          <TriangleAlert size={16} />
+          <span>Shortlist sheet URL missing. Response fetching remains available; shortlist import requires the response stage first.</span>
+        </div>
+      ) : null}
 
       {fetchingResponse ? (
         <div className="status" style={{ marginBottom: 12 }}>
@@ -5875,6 +5991,9 @@ function InterviewReportsPanel({ adminToken, opportunityId }) {
   const [error, setError] = useState("");
   const [tab, setTab] = useState("reports");
   const [reused, setReused] = useState(false);
+  const [manualText, setManualText] = useState("");
+  const [manualPayload, setManualPayload] = useState(null);
+  const [manualPreview, setManualPreview] = useState(null);
 
   async function refreshSide() {
     try {
@@ -5930,9 +6049,79 @@ function InterviewReportsPanel({ adminToken, opportunityId }) {
       });
       setReused(Boolean(confirmed.reused));
       setSessionId(confirmed.session_id);
-      const result = await rsaApi.analyze(adminToken, confirmed.session_id);
+      setStage("choose");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runAutomatedAnalysis() {
+    if (!sessionId || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      const result = await rsaApi.analyze(adminToken, sessionId);
       setAnalysis(result);
-      await loadReports(confirmed.session_id);
+      await loadReports(sessionId);
+      await refreshSide();
+      setStage("done");
+      setTab("reports");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function startManualAnalysis() {
+    setError("");
+    setManualText("");
+    setManualPayload(null);
+    setManualPreview(null);
+    setStage("manual");
+  }
+
+  function parseManualPayload() {
+    try {
+      const parsed = JSON.parse(manualText);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("Top-level JSON must be an object.");
+      return parsed;
+    } catch (err) {
+      setError(`Invalid manual analysis JSON: ${err.message}`);
+      return null;
+    }
+  }
+
+  async function previewManual() {
+    const payload = parseManualPayload();
+    if (!payload || !sessionId || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      setManualPayload(payload);
+      setManualPreview(await rsaApi.manualPreview(adminToken, sessionId, payload));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveManual() {
+    if (!manualPayload || !sessionId || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      const result = await rsaApi.manualSave(adminToken, sessionId, manualPayload);
+      setAnalysis({
+        ...result,
+        manual: true,
+        candidates_analyzed: result.candidate_reports_saved,
+        questions_extracted: result.questions_saved,
+      });
+      await loadReports(sessionId);
       await refreshSide();
       setStage("done");
       setTab("reports");
@@ -6062,6 +6251,71 @@ function InterviewReportsPanel({ adminToken, opportunityId }) {
         />
       ) : null}
 
+      {stage === "choose" ? (
+        <div className="rsa-analysis-choice">
+          <h3 className="detail-subhead">How do you want to analyze this interview?</h3>
+          <p className="rsa-hint">The transcript and confirmed participants are saved. Choose how to create the questions and feedback.</p>
+          <div className="rsa-analysis-choice-actions">
+            <button type="button" className="back-button" onClick={startManualAnalysis} disabled={busy}>
+              <Pencil size={16} /> Manual Analysis
+            </button>
+            <button type="button" className="primary-button" onClick={runAutomatedAnalysis} disabled={busy}>
+              {busy ? <Loader2 className="spin" size={18} /> : <Sparkles size={18} />}
+              Automated AI
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {stage === "manual" ? (
+        <div className="rsa-manual-analysis">
+          <h3 className="detail-subhead">Manual Interview Analysis</h3>
+          <p className="rsa-hint">Paste the structured JSON prepared from this confirmed transcript. Nothing is saved until you confirm the preview.</p>
+          <div className="rsa-manual-participants">
+            <strong>Interview participants</strong>
+            {(proposal?.shortlisted_students || []).filter((student) => (proposal?.speaker_map || []).some((entry) => entry.role === "student" && String(entry.student_id) === String(student.student_id))).map((student) => (
+              <span key={student.student_id}><CheckCircle2 size={15} /> {student.name || "Student"}</span>
+            ))}
+          </div>
+          {!manualPreview ? (
+            <>
+              <textarea className="rsa-textarea rsa-manual-textarea" value={manualText} onChange={(event) => setManualText(event.target.value)} spellCheck={false} placeholder={'{"candidates": [], "questions": [], "company_expectations": {}}'} />
+              <div className="rsa-actions">
+                <button type="button" className="back-button" onClick={() => setStage("choose")} disabled={busy}>Back</button>
+                <button type="button" className="primary-button" onClick={previewManual} disabled={busy || !manualText.trim()}>
+                  {busy ? <Loader2 className="spin" size={18} /> : <Eye size={18} />} Validate &amp; Preview
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="rsa-manual-preview">
+                <strong>Manual Analysis Preview</strong>
+                <span>Candidates: {manualPreview.candidates}</span>
+                <span>Questions: {manualPreview.questions}</span>
+                {manualPreview.anonymous_questions ? <span>Questions saved as anonymous: {manualPreview.anonymous_questions}</span> : null}
+                <span>Company feedback: {manualPreview.company_expectations ? "Yes" : "No"}</span>
+                {manualPreview.categories?.map((category, index) => (
+                  <span key={`${category.input}-${index}`}>Category: {category.input} → {category.normalized} ({category.status})</span>
+                ))}
+                {manualPreview.question_types?.map((type, index) => (
+                  <span key={`${type.input}-${index}`}>Question type: {type.input} → {type.normalized} ({type.status})</span>
+                ))}
+                {manualPreview.candidate_preview?.map((candidate) => (
+                  <span key={candidate.name}>{candidate.name}: {candidate.mapping_status} · Application {candidate.application} · Report {candidate.report} · {candidate.questions} question(s)</span>
+                ))}
+              </div>
+              <div className="rsa-actions">
+                <button type="button" className="back-button" onClick={() => setManualPreview(null)} disabled={busy}>Back</button>
+                <button type="button" className="primary-button" onClick={saveManual} disabled={busy}>
+                  {busy ? <Loader2 className="spin" size={18} /> : <BadgeCheck size={18} />} Save analysis
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      ) : null}
+
       {stage === "done" ? (
         <>
           {analysis ? (
@@ -6071,6 +6325,7 @@ function InterviewReportsPanel({ adminToken, opportunityId }) {
                 {reused ? "Re-ran the existing session (no duplicate created) — " : ""}
                 Analysed {analysis.candidates_analyzed} candidate(s), extracted {analysis.questions_extracted} questions
                 {analysis.model ? ` · ${analysis.model}` : ""}
+                {analysis.message ? ` — ${analysis.message}` : ""}
               </span>
             </div>
           ) : null}
@@ -6245,7 +6500,7 @@ function OpportunityDetail({ detail, adminToken, opportunityId, onRefresh }) {
   return (
     <>
       <section className="stats-grid admin-stats">
-        <Metric icon={<UsersRound size={20} />} label="Applied" value={stats.applied_count ?? 0} />
+        <Metric icon={<UsersRound size={20} />} label="Applied" value={o.application_count ?? 0} />
         <Metric icon={<BadgeCheck size={20} />} label="Shortlisted" value={o.shortlists_count ?? 0} />
         <Metric icon={<XCircle size={20} />} label="Rejected" value={stats.rejected_count ?? 0} />
         <Metric icon={<BarChart3 size={20} />} label="Responses" value={stats.response_count ?? 0} />
