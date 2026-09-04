@@ -972,13 +972,162 @@ function studentStatusInfo(app) {
   return { key: "applied", label: "Applied", cls: "neutral" };
 }
 
+// Section labels are user-facing only. `key` still matches the bucket key derived
+// from studentStatusInfo(), so the underlying status values are untouched:
+// "not_shortlisted" is displayed as "Next Steps" but stored/derived exactly as before.
+// `subText`, when present, replaces the default "<count> <sub>" summary line.
 const SD_GROUPS = [
   { key: "interviewing", title: "Interviewing", chipLabel: "Now", chipCls: "warn", sub: "feedback may be ready" },
   { key: "shortlisted", title: "Shortlisted", chipLabel: "Good news", chipCls: "good", sub: "companies want to talk to you" },
   { key: "applied", title: "Applied · waiting to hear back", chipLabel: "Waiting", chipCls: "neutral", sub: "companies" },
-  { key: "not_shortlisted", title: "Not shortlisted", chipLabel: "Closed", chipCls: "bad", sub: "profile wasn't taken forward — read the note and update" },
+  {
+    key: "not_shortlisted",
+    title: "Next Steps",
+    chipLabel: "Next",
+    chipCls: "neutral",
+    sub: "to learn from",
+    subText: "These opportunities didn't move forward this time — use the feedback to prepare for the next one.",
+  },
   { key: "declined", title: "Not interested", chipLabel: "Closed", chipCls: "muted", sub: "you declined" },
 ];
+
+// Every accordion opens to roughly this many complete cards before it scrolls.
+const SD_VISIBLE_CARDS = 4;
+
+// The application card. Hoisted to module scope so it keeps a stable component
+// identity across StudentDashboard re-renders — a card that remounts would reset
+// the scroll position of the list it sits in.
+function SdAppCard({ app, report, onOpenReport }) {
+  const info = studentStatusInfo(app);
+  const opp = app.opportunity || {};
+  const links = [
+    ["Resume", app.resume_link, FileText],
+    ["Project", app.project_link, Code],
+    ["GitHub", app.github_link, Github],
+  ].filter(([, href]) => Boolean(href));
+  const meta = [
+    opp.location,
+    opp.stipend ? `Stipend ${opp.stipend}` : null,
+    opp.duration,
+    app.applied_at ? `Applied ${formatDate(app.applied_at)}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  return (
+    <div className="sd-app">
+      <div className="sd-app-top">
+        <div className="sd-app-info">
+          <div className="sd-app-title">
+            <strong>{app.company?.name || "Company"}</strong>
+            <span className={`sd-pill ${info.cls}`}>{info.label}</span>
+          </div>
+          <p className="sd-app-role">
+            {opp.role || "Role not mapped"}
+            {opp.tech_stack || opp.must_have_skills ? ` · ${opp.tech_stack || opp.must_have_skills}` : ""}
+          </p>
+          {meta ? <p className="sd-app-meta">{meta}</p> : null}
+        </div>
+        <div className="sd-app-actions">
+          {links.length ? (
+            <div className="sd-links">
+              {links.map(([label, href, Icon]) => (
+                <a key={label} href={href} target="_blank" rel="noreferrer" title={label}>
+                  <Icon size={17} />
+                </a>
+              ))}
+            </div>
+          ) : null}
+          {report ? (
+            <button type="button" className="sd-read-fb" onClick={() => onOpenReport(report.id)}>
+              <FileText size={14} /> Read feedback
+            </button>
+          ) : null}
+        </div>
+      </div>
+      {app.screening_remark ? (
+        <div className="sd-remark">
+          <AlertCircle size={15} />
+          <p><strong>Note from the company</strong> — {app.screening_remark}</p>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// The scroll region shared by every accordion section. Rather than guessing at a
+// pixel height, it measures the first SD_VISIBLE_CARDS real cards and caps the
+// list just below the last one, so a card is never cut in half. Lists shorter
+// than that render at their natural height and never show a scrollbar.
+function SdScrollList({ scrollKey, itemCount, children }) {
+  const listRef = useRef(null);
+  const [maxHeight, setMaxHeight] = useState(null);
+
+  useLayoutEffect(() => {
+    const el = listRef.current;
+    if (!el || itemCount <= SD_VISIBLE_CARDS) {
+      setMaxHeight(null);
+      return undefined;
+    }
+    const measure = () => {
+      const cards = Array.from(el.children);
+      if (cards.length <= SD_VISIBLE_CARDS) {
+        setMaxHeight(null);
+        return;
+      }
+      const cs = window.getComputedStyle(el);
+      const padBottom = parseFloat(cs.paddingBottom) || 0;
+      // Measure to the *bottom edge of the Nth card* rather than summing heights:
+      // reading it off the live layout picks up the container's border and top
+      // padding, the row gaps, and any card that is taller than its neighbours.
+      // Adding the list's own padding-bottom lands the cut on the gap before card
+      // N+1, so N cards show whole and none of the next one peeks through.
+      const lastRect = cards[SD_VISIBLE_CARDS - 1].getBoundingClientRect();
+      const next = Math.round(lastRect.bottom - el.getBoundingClientRect().top + el.scrollTop + padBottom);
+      setMaxHeight((prev) => (prev === next ? prev : next));
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return undefined;
+    // Observe the cards, not the container: measuring off the container would feed
+    // its own max-height back into the observer.
+    const ro = new ResizeObserver(measure);
+    Array.from(el.children).forEach((card) => ro.observe(card));
+    return () => ro.disconnect();
+  }, [itemCount, children]);
+
+  const scrolls = maxHeight != null;
+  return (
+    <div
+      ref={listRef}
+      className={`sd-group-body${scrolls ? " is-scroll" : ""}`}
+      data-scroll-key={scrolls ? scrollKey : undefined}
+      style={scrolls ? { "--sd-list-max": `${maxHeight}px` } : undefined}
+    >
+      {children}
+    </div>
+  );
+}
+
+// One accordion section. Every section renders through this, so the header, the
+// caret and the scroll behaviour live in a single place.
+function SdAccordionSection({ group, items, open, onToggle, sectionRef, renderItem }) {
+  return (
+    <div className="sd-group" ref={sectionRef}>
+      <button type="button" className="sd-group-head" aria-expanded={open} onClick={onToggle}>
+        <span className={`sd-chip ${group.chipCls}`}>{group.chipLabel}</span>
+        <span className="sd-group-heading">
+          <span className="sd-group-title">{group.title}</span>
+          <span className="sd-group-sub">{group.subText || `${items.length} ${group.sub}`}</span>
+        </span>
+        <span className="sd-caret">{open ? <ChevronDown size={18} /> : <ChevronRight size={18} />}</span>
+      </button>
+      {open ? (
+        <SdScrollList scrollKey={`sd-group-${group.key}`} itemCount={items.length}>
+          {items.map(renderItem)}
+        </SdScrollList>
+      ) : null}
+    </div>
+  );
+}
 
 function StudentIssuesView({ token }) {
   const [issues, setIssues] = useState([]);
@@ -1101,7 +1250,13 @@ function StudentDashboard({ student, token, onLogout, route = [], navigate = () 
   const [issueBusy, setIssueBusy] = useState(false);
   const [issueError, setIssueError] = useState("");
   const [issueSuccess, setIssueSuccess] = useState("");
-  const [openGroups, setOpenGroups] = useState({ interviewing: true, shortlisted: true, applied: false, declined: false });
+  // One shared accordion slot: exactly one detail section is open at a time, and
+  // null means every section starts closed.
+  const [activeSection, setActiveSection] = useState(null);
+  // Refs keyed by section key, so the summary cards scroll to a real node rather
+  // than relying on a DOM selector.
+  const sectionRefs = useRef({});
+  const pendingScroll = useRef(null);
 
   useEffect(() => {
     let isCurrent = true;
@@ -1150,10 +1305,26 @@ function StudentDashboard({ student, token, onLogout, route = [], navigate = () 
     return map;
   }, [reports]);
 
-  function openReport(reportId) {
+  const scrollToSection = useCallback((key) => {
+    const node = sectionRefs.current[key];
+    if (!node) return;
+    const reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    node.scrollIntoView({ behavior: reduced ? "auto" : "smooth", block: "start" });
+  }, []);
+
+  // Scroll only once the section has actually opened, so we land on the expanded
+  // card rather than on where it used to be. A pending request only applies to the
+  // render that queued it, so it is always cleared.
+  useEffect(() => {
+    const key = pendingScroll.current;
+    pendingScroll.current = null;
+    if (key && key === activeSection) scrollToSection(key);
+  }, [activeSection, scrollToSection]);
+
+  const openReport = useCallback((reportId) => {
     setFocusReportId(reportId);
     setView("reports");
-  }
+  }, [setView]);
 
   const initials = useMemo(() => {
     return (student.name || "")
@@ -1191,8 +1362,21 @@ function StudentDashboard({ student, token, onLogout, route = [], navigate = () 
     ? `${shortlisted.length} ${shortlisted.length === 1 ? "company has" : "companies have"} shortlisted you${reports.length ? ", and you have new coaching feedback." : "."}`
     : "Here's where your applications stand.";
 
-  function toggleGroup(key) {
-    setOpenGroups((prev) => ({ ...prev, [key]: !prev[key] }));
+  // Header click: open a closed section, close the open one.
+  function toggleSection(key) {
+    setActiveSection((prev) => (prev === key ? null : key));
+  }
+
+  // Top summary click: always open the matching section (never toggle it shut).
+  // If it is already open, React would bail out of the identical state update and
+  // the scroll effect would never fire — so scroll straight away in that case.
+  function openSectionFromSummary(key) {
+    if (activeSection === key) {
+      scrollToSection(key);
+      return;
+    }
+    pendingScroll.current = key;
+    setActiveSection(key);
   }
 
   function closeIssue() {
@@ -1228,64 +1412,6 @@ function StudentDashboard({ student, token, onLogout, route = [], navigate = () 
     } finally {
       setIssueBusy(false);
     }
-  }
-
-  function AppCard({ app }) {
-    const info = studentStatusInfo(app);
-    const opp = app.opportunity || {};
-    const report = reportByApplication[app.id];
-    const links = [
-      ["Resume", app.resume_link, FileText],
-      ["Project", app.project_link, Code],
-      ["GitHub", app.github_link, Github],
-    ].filter(([, href]) => Boolean(href));
-    const meta = [
-      opp.location,
-      opp.stipend ? `Stipend ${opp.stipend}` : null,
-      opp.duration,
-      app.applied_at ? `Applied ${formatDate(app.applied_at)}` : null,
-    ]
-      .filter(Boolean)
-      .join(" · ");
-    return (
-      <div className="sd-app">
-        <div className="sd-app-top">
-          <div className="sd-app-info">
-            <div className="sd-app-title">
-              <strong>{app.company?.name || "Company"}</strong>
-              <span className={`sd-pill ${info.cls}`}>{info.label}</span>
-            </div>
-            <p className="sd-app-role">
-              {opp.role || "Role not mapped"}
-              {opp.tech_stack || opp.must_have_skills ? ` · ${opp.tech_stack || opp.must_have_skills}` : ""}
-            </p>
-            {meta ? <p className="sd-app-meta">{meta}</p> : null}
-          </div>
-          <div className="sd-app-actions">
-            {links.length ? (
-              <div className="sd-links">
-                {links.map(([label, href, Icon]) => (
-                  <a key={label} href={href} target="_blank" rel="noreferrer" title={label}>
-                    <Icon size={17} />
-                  </a>
-                ))}
-              </div>
-            ) : null}
-            {report ? (
-              <button type="button" className="sd-read-fb" onClick={() => openReport(report.id)}>
-                <FileText size={14} /> Read feedback
-              </button>
-            ) : null}
-          </div>
-        </div>
-        {app.screening_remark ? (
-          <div className="sd-remark">
-            <AlertCircle size={15} />
-            <p><strong>Note from the company</strong> — {app.screening_remark}</p>
-          </div>
-        ) : null}
-      </div>
-    );
   }
 
   return (
@@ -1422,24 +1548,32 @@ function StudentDashboard({ student, token, onLogout, route = [], navigate = () 
             <section className="sd-stage-bar">
               <div className="sd-stage-head">
                 <h2>Where your {applications.length} application{applications.length === 1 ? "" : "s"} stand</h2>
-                <span>Tap a stage to jump to it</span>
+                <span>Tap a stage to open it below</span>
               </div>
               <div className="sd-stages">
-                {stages.map((stage) => (
-                  <button
-                    type="button"
-                    key={stage.key}
-                    className={`sd-stage ${stage.key !== "feedback" && openGroups[stage.key] ? "on" : ""}`}
-                    onClick={() => (stage.key === "feedback" ? setView("reports") : toggleGroup(stage.key))}
-                  >
-                    <span className="sd-stage-label">
-                      <i style={{ background: stage.color }} /> {stage.label}
-                    </span>
-                    <span className="sd-stage-count">
-                      <strong>{stage.count}</strong> {stage.note}
-                    </span>
-                  </button>
-                ))}
+                {stages.map((stage) => {
+                  // "Feedback ready" keeps its existing behaviour (it opens the
+                  // feedback view, it is not an application-stage accordion).
+                  const navigates = stage.key !== "feedback";
+                  const isOpen = navigates && activeSection === stage.key;
+                  return (
+                    <button
+                      type="button"
+                      key={stage.key}
+                      className={`sd-stage ${isOpen ? "on" : ""}`}
+                      aria-expanded={navigates ? isOpen : undefined}
+                      disabled={navigates && stage.count === 0}
+                      onClick={() => (navigates ? openSectionFromSummary(stage.key) : setView("reports"))}
+                    >
+                      <span className="sd-stage-label">
+                        <i style={{ background: stage.color }} /> {stage.label}
+                      </span>
+                      <span className="sd-stage-count">
+                        <strong>{stage.count}</strong> {stage.note}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             </section>
 
@@ -1449,21 +1583,23 @@ function StudentDashboard({ student, token, onLogout, route = [], navigate = () 
                   SD_GROUPS.map((g) => {
                     const items = groups[g.key];
                     if (!items.length) return null;
-                    const open = openGroups[g.key];
                     return (
-                      <div className="sd-group" key={g.key}>
-                        <button type="button" className="sd-group-head" onClick={() => toggleGroup(g.key)}>
-                          <span className={`sd-chip ${g.chipCls}`}>{g.chipLabel}</span>
-                          <span className="sd-group-title">{g.title}</span>
-                          <span className="sd-group-sub">{items.length} {g.sub}</span>
-                          <span className="sd-caret">{open ? <ChevronDown size={18} /> : <ChevronRight size={18} />}</span>
-                        </button>
-                        {open ? (
-                          <div className="sd-group-body">
-                            {items.map((app) => <AppCard key={app.id} app={app} />)}
-                          </div>
-                        ) : null}
-                      </div>
+                      <SdAccordionSection
+                        key={g.key}
+                        group={g}
+                        items={items}
+                        open={activeSection === g.key}
+                        onToggle={() => toggleSection(g.key)}
+                        sectionRef={(node) => { sectionRefs.current[g.key] = node; }}
+                        renderItem={(app) => (
+                          <SdAppCard
+                            key={app.id}
+                            app={app}
+                            report={reportByApplication[app.id]}
+                            onOpenReport={openReport}
+                          />
+                        )}
+                      />
                     );
                   })
                 ) : (

@@ -4486,6 +4486,11 @@ input:focus {
   box-shadow: var(--wk-shadow-xs);
 }
 
+/* a stage with no applications has no section to open */
+.sd-stage:disabled {
+  cursor: default;
+}
+
 .sd-stage-label {
   display: flex;
   align-items: center;
@@ -4528,6 +4533,9 @@ input:focus {
 .sd-groups {
   display: grid;
   gap: 12px;
+  align-content: start;
+  /* viewport ceiling for an open list — overridden per breakpoint below */
+  --sd-list-cap: 64vh;
 }
 
 /* application groups */
@@ -4549,6 +4557,25 @@ input:focus {
   background: transparent;
   cursor: pointer;
   text-align: left;
+}
+
+/* the summary cards scroll the section to the top of the viewport, so keep a
+   little breathing room above it */
+.sd-group {
+  scroll-margin-top: 16px;
+}
+
+/* title over supporting line, so a full sentence of supporting copy wraps
+   cleanly instead of fighting the title for room on one row */
+.sd-group-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.sd-group-head .sd-chip {
+  flex: 0 0 auto;
 }
 
 .sd-group-head:hover {
@@ -4578,6 +4605,18 @@ input:focus {
   padding: 8px;
   display: grid;
   gap: 8px;
+  align-content: start;
+}
+
+/* Only lists longer than SD_VISIBLE_CARDS get .is-scroll. --sd-list-max is set
+   inline from the measured height of the first 4 real cards; --sd-list-cap keeps
+   a long list inside the viewport on short screens. overscroll-behavior stops the
+   scroll from chaining to the page once the list hits an end. */
+.sd-group-body.is-scroll {
+  max-height: min(var(--sd-list-max, 60vh), var(--sd-list-cap, 64vh));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 /* chips + pills */
@@ -5304,6 +5343,10 @@ input:focus {
   .sd-stages {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+  /* single column: the list can use more of the viewport before it scrolls */
+  .sd-groups {
+    --sd-list-cap: 70vh;
+  }
 }
 
 /* ============================================================
@@ -5313,6 +5356,20 @@ input:focus {
    (both are .dashboard-shell.sd-shell).
    ============================================================ */
 @media (max-width: 640px) {
+  .sd-groups {
+    --sd-list-cap: 72vh;
+  }
+  /* narrow screens: let the chip sit above the heading instead of squeezing it */
+  .sd-group-head {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 8px 10px;
+    padding: 14px 16px;
+  }
+  .sd-group-body {
+    padding: 8px 6px;
+  }
+
   /* one column + room so content clears the fixed bottom bar */
   .dashboard-shell { grid-template-columns: 1fr; }
   .dashboard-shell .dashboard-main {
