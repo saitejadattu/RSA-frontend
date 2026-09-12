@@ -4528,14 +4528,16 @@ input:focus {
   grid-template-columns: minmax(0, 1.65fr) minmax(300px, 1fr);
   gap: 20px;
   align-items: start;
+  min-height: 0;
 }
 
 .sd-groups {
   display: grid;
   gap: 12px;
   align-content: start;
-  /* viewport ceiling for an open list — overridden per breakpoint below */
-  --sd-list-cap: 64vh;
+  /* lets the column shrink inside the grid so an inner scroll area can work */
+  min-height: 0;
+  min-width: 0;
 }
 
 /* application groups */
@@ -4608,12 +4610,17 @@ input:focus {
   align-content: start;
 }
 
-/* Only lists longer than SD_VISIBLE_CARDS get .is-scroll. --sd-list-max is set
-   inline from the measured height of the first 4 real cards; --sd-list-cap keeps
-   a long list inside the viewport on short screens. overscroll-behavior stops the
-   scroll from chaining to the page once the list hits an end. */
+/* Only a list that both overflows and has usable room gets .is-scroll.
+   --sd-list-max is measured in JS from the real cards and the space actually left
+   in the viewport, and always lands on a card boundary — there is no fixed pixel
+   height and no viewport guess here. Without the class the list keeps its natural
+   height and the page flows, which is what happens on very short screens.
+   overscroll-behavior stops the scroll chaining to the page at either end. */
 .sd-group-body.is-scroll {
-  max-height: min(var(--sd-list-max, 60vh), var(--sd-list-cap, 64vh));
+  /* the var is set once the list has been measured; until then the list keeps its
+     natural height, but the gutter below is already reserved so the measurement
+     happens at the width the list will actually have */
+  max-height: var(--sd-list-max, none);
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
@@ -4737,6 +4744,34 @@ input:focus {
   background: #e3efed;
 }
 
+/* fullscreen/expand control — an additional action, styled to sit quietly beside
+   the existing card icons until hovered or focused */
+.sd-app-expand {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  border: 1px solid #eef1f1;
+  border-radius: 8px;
+  background: #fff;
+  color: #667085;
+  cursor: pointer;
+}
+
+.sd-app-expand:hover {
+  border-color: #cfe4e0;
+  background: #f0f7f6;
+  color: #0f766e;
+}
+
+.sd-app-expand:focus-visible,
+.sd-modal-close:focus-visible {
+  outline: 2px solid #0f766e;
+  outline-offset: 2px;
+}
+
 .sd-remark {
   margin-top: 12px;
   display: flex;
@@ -4763,8 +4798,184 @@ input:focus {
 .sd-side {
   display: grid;
   gap: 12px;
+  align-content: start;
+  min-height: 0;
+  min-width: 0;
   position: sticky;
   top: 28px;
+  /* keeps coaching feedback inside the viewport instead of stretching the page;
+     it scrolls internally only when its own content is genuinely long */
+  max-height: calc(100vh - 56px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* compact trigger that replaced the permanent "Fix these first" panel */
+.sd-fix-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.sd-fix-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #e8f4f2;
+  color: #0f766e;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* ---------- popup ---------- */
+.sd-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(16, 24, 40, 0.42);
+  /* the dashboard keeps its scroll position while the popup is open */
+  overscroll-behavior: contain;
+}
+
+.sd-modal {
+  width: min(460px, 100%);
+  /* viewport-relative, so the dialog never outgrows the screen it opens on */
+  max-height: min(560px, calc(100vh - 32px));
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: #fff;
+  border: 1px solid #e6ebea;
+  border-radius: 12px;
+  box-shadow: var(--wk-shadow-sm);
+  overflow: hidden;
+}
+
+.sd-modal.is-wide {
+  width: min(560px, 100%);
+}
+
+/* the expanded application view */
+.sd-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.sd-detail-role {
+  font-size: 14px;
+  font-weight: 600;
+  color: #101828;
+}
+
+.sd-detail-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid #eef1f1;
+  border-radius: 10px;
+  background: #fcfdfd;
+}
+
+.sd-detail-fact {
+  min-width: 0;
+}
+
+.sd-detail-fact dt {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #667085;
+}
+
+.sd-detail-fact dd {
+  margin-top: 3px;
+  font-size: 13px;
+  color: #101828;
+  overflow-wrap: anywhere;
+}
+
+.sd-detail-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sd-detail-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border: 1px solid #cfe4e0;
+  border-radius: 8px;
+  background: #f0f7f6;
+  color: #0f766e;
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.sd-detail-links a:hover {
+  background: #e3efed;
+}
+
+.sd-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px;
+  border-bottom: 1px solid #eef1f1;
+  flex: 0 0 auto;
+}
+
+.sd-modal-head h3 {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: #101828;
+}
+
+.sd-modal-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #667085;
+  cursor: pointer;
+}
+
+.sd-modal-close:hover {
+  background: #f2f4f7;
+  color: #101828;
+}
+
+/* the body is the part that scrolls, so long content never grows the dialog */
+.sd-modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 16px 18px 18px;
+  display: grid;
+  gap: 14px;
+  align-content: start;
 }
 
 .sd-coach {
@@ -5337,15 +5548,14 @@ input:focus {
   .sd-grid {
     grid-template-columns: 1fr;
   }
+  /* stacked: the coaching column flows with the page instead of being pinned */
   .sd-side {
     position: static;
+    max-height: none;
+    overflow: visible;
   }
   .sd-stages {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  /* single column: the list can use more of the viewport before it scrolls */
-  .sd-groups {
-    --sd-list-cap: 70vh;
   }
 }
 
@@ -5356,9 +5566,21 @@ input:focus {
    (both are .dashboard-shell.sd-shell).
    ============================================================ */
 @media (max-width: 640px) {
-  .sd-groups {
-    --sd-list-cap: 72vh;
+  /* popups use nearly the full width but keep a safe margin */
+  .sd-modal-backdrop {
+    padding: 12px;
+    align-items: end;
   }
+  .sd-modal,
+  .sd-modal.is-wide {
+    width: 100%;
+    max-height: calc(100vh - 24px);
+  }
+  .sd-detail-facts {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
   /* narrow screens: let the chip sit above the heading instead of squeezing it */
   .sd-group-head {
     align-items: flex-start;

@@ -42,8 +42,10 @@ import {
   Trash2,
   TriangleAlert,
   Upload,
+  Maximize2,
   Wand2,
   Pencil,
+  X,
 } from "lucide-react";
 import "./styles.css";
 
@@ -991,28 +993,57 @@ const SD_GROUPS = [
   { key: "declined", title: "Not interested", chipLabel: "Closed", chipCls: "muted", sub: "you declined" },
 ];
 
-// Every accordion opens to roughly this many complete cards before it scrolls.
+// Target number of complete cards when there is room for them.
 const SD_VISIBLE_CARDS = 4;
+// Floor for a constrained list. A section low in the column, or a short screen,
+// can leave less room than this — the list still stops here rather than growing
+// unbounded, and the page scrolls the last card or two into view naturally.
+const SD_MIN_CARDS = 2;
+// Breathing room kept below an open list so it never runs into the viewport edge.
+const SD_LIST_BOTTOM_GAP = 24;
+
+// Single source of truth for what is known about an application. The collapsed
+// card's meta line and the expanded detail popup are both built from these, so a
+// field can never show in one view and go missing from the other. Nothing here is
+// derived or invented — every value already exists on the application payload.
+const SD_APP_LINKS = [
+  ["Resume", "resume_link", FileText],
+  ["Project", "project_link", Code],
+  ["GitHub", "github_link", Github],
+];
+
+function sdAppLinks(app) {
+  return SD_APP_LINKS.map(([label, key, Icon]) => [label, app[key], Icon]).filter(([, href]) => Boolean(href));
+}
+
+function sdAppFacts(app) {
+  const opp = app.opportunity || {};
+  return [
+    ["Location", opp.location],
+    ["Stipend", opp.stipend],
+    ["Duration", opp.duration],
+    ["Applied", app.applied_at ? formatDate(app.applied_at) : null],
+    ["Skills", opp.tech_stack || opp.must_have_skills],
+  ].filter(([, value]) => Boolean(value));
+}
+
+// The card's one-line summary, rendered from the same facts the popup lists.
+function sdAppMetaLine(app) {
+  return sdAppFacts(app)
+    .filter(([label]) => label !== "Skills")
+    // only Stipend and Applied carry their label inline, exactly as before
+    .map(([label, value]) => (label === "Stipend" || label === "Applied" ? `${label} ${value}` : value))
+    .join(" · ");
+}
 
 // The application card. Hoisted to module scope so it keeps a stable component
 // identity across StudentDashboard re-renders — a card that remounts would reset
 // the scroll position of the list it sits in.
-function SdAppCard({ app, report, onOpenReport }) {
+function SdAppCard({ app, report, onOpenReport, onExpand }) {
   const info = studentStatusInfo(app);
   const opp = app.opportunity || {};
-  const links = [
-    ["Resume", app.resume_link, FileText],
-    ["Project", app.project_link, Code],
-    ["GitHub", app.github_link, Github],
-  ].filter(([, href]) => Boolean(href));
-  const meta = [
-    opp.location,
-    opp.stipend ? `Stipend ${opp.stipend}` : null,
-    opp.duration,
-    app.applied_at ? `Applied ${formatDate(app.applied_at)}` : null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  const links = sdAppLinks(app);
+  const meta = sdAppMetaLine(app);
   return (
     <div className="sd-app">
       <div className="sd-app-top">
@@ -1042,6 +1073,17 @@ function SdAppCard({ app, report, onOpenReport }) {
               <FileText size={14} /> Read feedback
             </button>
           ) : null}
+          {onExpand ? (
+            <button
+              type="button"
+              className="sd-app-expand"
+              aria-label={`View application details for ${app.company?.name || "this company"}`}
+              title="View application details"
+              onClick={() => onExpand(app)}
+            >
+              <Maximize2 size={16} />
+            </button>
+          ) : null}
         </div>
       </div>
       {app.screening_remark ? (
@@ -1054,10 +1096,12 @@ function SdAppCard({ app, report, onOpenReport }) {
   );
 }
 
-// The scroll region shared by every accordion section. Rather than guessing at a
-// pixel height, it measures the first SD_VISIBLE_CARDS real cards and caps the
-// list just below the last one, so a card is never cut in half. Lists shorter
-// than that render at their natural height and never show a scrollbar.
+// The scroll region shared by every accordion section. It sizes itself from two
+// live measurements rather than any fixed pixel value: the real height of the
+// cards, and the space actually left below the list in the viewport. It then cuts
+// on a card boundary — SD_VISIBLE_CARDS where there is room, fewer on a short
+// screen, and not at all when even SD_MIN_CARDS will not fit (there the page just
+// flows). A card is therefore never sliced in half at any viewport size.
 function SdScrollList({ scrollKey, itemCount, children }) {
   const listRef = useRef(null);
   const [maxHeight, setMaxHeight] = useState(null);
@@ -1076,42 +1120,170 @@ function SdScrollList({ scrollKey, itemCount, children }) {
       }
       const cs = window.getComputedStyle(el);
       const padBottom = parseFloat(cs.paddingBottom) || 0;
-      // Measure to the *bottom edge of the Nth card* rather than summing heights:
-      // reading it off the live layout picks up the container's border and top
-      // padding, the row gaps, and any card that is taller than its neighbours.
-      // Adding the list's own padding-bottom lands the cut on the gap before card
-      // N+1, so N cards show whole and none of the next one peeks through.
-      const lastRect = cards[SD_VISIBLE_CARDS - 1].getBoundingClientRect();
-      const next = Math.round(lastRect.bottom - el.getBoundingClientRect().top + el.scrollTop + padBottom);
-      setMaxHeight((prev) => (prev === next ? prev : next));
+      const rect = el.getBoundingClientRect();
+
+      // Height of the list if it were cut just under card i. Read off live layout
+      // rather than summed, so it picks up the container border, top padding, row
+      // gaps, and any card taller than its neighbours. Adding padding-bottom lands
+      // the cut inside the gap before card i+1, so nothing peeks through.
+      const edgeAfter = (i) =>
+        cards[i].getBoundingClientRect().bottom - rect.top + el.scrollTop + padBottom;
+
+      // Space between the top of the list and the bottom of the viewport, measured
+      // from the document so it does not drift as the page scrolls.
+      const available = window.innerHeight - (rect.top + window.scrollY) - SD_LIST_BOTTOM_GAP;
+      const ideal = edgeAfter(SD_VISIBLE_CARDS - 1);
+
+      let next;
+      if (available >= ideal) {
+        // Room for the full target: show exactly SD_VISIBLE_CARDS.
+        next = ideal;
+      } else {
+        // Tighter spot — a short screen, or a section sitting low in the column.
+        // Step down to the last card that still fits whole, but never below the
+        // SD_MIN_CARDS floor: an unconstrained list here is what makes the page
+        // grow without bound, which is the thing this is here to prevent.
+        let fits = -1;
+        for (let i = 0; i < cards.length; i += 1) {
+          if (edgeAfter(i) <= available) fits = i; else break;
+        }
+        next = edgeAfter(Math.max(fits, SD_MIN_CARDS - 1));
+      }
+
+      const rounded = Math.round(next);
+      setMaxHeight((prev) => (prev === rounded ? prev : rounded));
     };
     measure();
-    if (typeof ResizeObserver === "undefined") return undefined;
-    // Observe the cards, not the container: measuring off the container would feed
-    // its own max-height back into the observer.
-    const ro = new ResizeObserver(measure);
-    Array.from(el.children).forEach((card) => ro.observe(card));
-    return () => ro.disconnect();
+    // Re-measure when the viewport changes: available space drives the height.
+    window.addEventListener("resize", measure);
+    let ro;
+    if (typeof ResizeObserver !== "undefined") {
+      // Observe the cards, not the container: measuring off the container would
+      // feed its own max-height back into the observer.
+      ro = new ResizeObserver(measure);
+      Array.from(el.children).forEach((card) => ro.observe(card));
+    }
+    return () => {
+      window.removeEventListener("resize", measure);
+      if (ro) ro.disconnect();
+    };
   }, [itemCount, children]);
 
-  const scrolls = maxHeight != null;
+  // Whether the list will scroll is known from the item count alone, so the
+  // scroll styling (and with it the reserved scrollbar gutter) is applied on the
+  // first render — before measuring. Measuring at the final content width matters:
+  // reserving the gutter afterwards would re-wrap the card text, make the cards
+  // taller, and leave the height we just computed cutting through a card.
+  const scrolls = itemCount > SD_VISIBLE_CARDS;
   return (
     <div
       ref={listRef}
       className={`sd-group-body${scrolls ? " is-scroll" : ""}`}
       data-scroll-key={scrolls ? scrollKey : undefined}
-      style={scrolls ? { "--sd-list-max": `${maxHeight}px` } : undefined}
+      style={maxHeight == null ? undefined : { "--sd-list-max": `${maxHeight}px` }}
     >
       {children}
     </div>
   );
 }
 
+// The expanded view of one application card. It shows the same fields the card is
+// built from (via sdAppFacts / sdAppLinks) with room to display them in full, so
+// it reads as the same card opened up rather than a different screen.
+function SdAppDetailModal({ app, report, onOpenReport, onClose }) {
+  const info = studentStatusInfo(app);
+  const opp = app.opportunity || {};
+  const facts = sdAppFacts(app);
+  const links = sdAppLinks(app);
+  return (
+    <SdModal wide title={app.company?.name || "Company"} onClose={onClose}>
+      <div className="sd-detail-head">
+        <p className="sd-detail-role">{opp.role || "Role not mapped"}</p>
+        <span className={`sd-pill ${info.cls}`}>{info.label}</span>
+      </div>
+
+      <dl className="sd-detail-facts">
+        {facts.map(([label, value]) => (
+          <div className="sd-detail-fact" key={label}>
+            <dt>{label}</dt>
+            <dd>{value}</dd>
+          </div>
+        ))}
+      </dl>
+
+      {app.screening_remark ? (
+        <div className="sd-remark">
+          <AlertCircle size={15} />
+          <p><strong>Note from the company</strong> — {app.screening_remark}</p>
+        </div>
+      ) : null}
+
+      {links.length ? (
+        <div className="sd-detail-links">
+          {links.map(([label, href, Icon]) => (
+            <a key={label} href={href} target="_blank" rel="noreferrer">
+              <Icon size={15} /> {label}
+            </a>
+          ))}
+        </div>
+      ) : null}
+
+      {report ? (
+        <button
+          type="button"
+          className="sd-btn-soft"
+          onClick={() => {
+            onClose();
+            onOpenReport(report.id);
+          }}
+        >
+          <FileText size={15} /> Read feedback
+        </button>
+      ) : (
+        <p className="sd-empty-note">Interview feedback will appear here once it is published.</p>
+      )}
+    </SdModal>
+  );
+}
+
+// Centred popup used for panels that do not earn permanent dashboard space.
+// Closes on the X, on a backdrop click and on Escape; the body scrolls internally
+// so long content never grows the dialog past the viewport.
+function SdModal({ title, onClose, children, wide = false }) {
+  useEffect(() => {
+    const onKey = (event) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="sd-modal-backdrop"
+      role="presentation"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div className={`sd-modal${wide ? " is-wide" : ""}`} role="dialog" aria-modal="true" aria-label={title}>
+        <div className="sd-modal-head">
+          <h3>{title}</h3>
+          <button type="button" className="sd-modal-close" onClick={onClose} aria-label="Close">
+            <X size={18} />
+          </button>
+        </div>
+        <div className="sd-modal-body">{children}</div>
+      </div>
+    </div>
+  );
+}
+
 // One accordion section. Every section renders through this, so the header, the
 // caret and the scroll behaviour live in a single place.
-function SdAccordionSection({ group, items, open, onToggle, sectionRef, renderItem }) {
+function SdAccordionSection({ group, items, open, onToggle, renderItem }) {
   return (
-    <div className="sd-group" ref={sectionRef}>
+    <div className="sd-group">
       <button type="button" className="sd-group-head" aria-expanded={open} onClick={onToggle}>
         <span className={`sd-chip ${group.chipCls}`}>{group.chipLabel}</span>
         <span className="sd-group-heading">
@@ -1253,10 +1425,11 @@ function StudentDashboard({ student, token, onLogout, route = [], navigate = () 
   // One shared accordion slot: exactly one detail section is open at a time, and
   // null means every section starts closed.
   const [activeSection, setActiveSection] = useState(null);
-  // Refs keyed by section key, so the summary cards scroll to a real node rather
-  // than relying on a DOM selector.
-  const sectionRefs = useRef({});
-  const pendingScroll = useRef(null);
+  // Opening a section is a pure state change — no scrolling, no viewport movement.
+  const [fixOpen, setFixOpen] = useState(false);
+  // Held separately from activeSection, so expanding a card cannot disturb which
+  // accordion is open or where the page is scrolled.
+  const [detailApp, setDetailApp] = useState(null);
 
   useEffect(() => {
     let isCurrent = true;
@@ -1305,22 +1478,6 @@ function StudentDashboard({ student, token, onLogout, route = [], navigate = () 
     return map;
   }, [reports]);
 
-  const scrollToSection = useCallback((key) => {
-    const node = sectionRefs.current[key];
-    if (!node) return;
-    const reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    node.scrollIntoView({ behavior: reduced ? "auto" : "smooth", block: "start" });
-  }, []);
-
-  // Scroll only once the section has actually opened, so we land on the expanded
-  // card rather than on where it used to be. A pending request only applies to the
-  // render that queued it, so it is always cleared.
-  useEffect(() => {
-    const key = pendingScroll.current;
-    pendingScroll.current = null;
-    if (key && key === activeSection) scrollToSection(key);
-  }, [activeSection, scrollToSection]);
-
   const openReport = useCallback((reportId) => {
     setFocusReportId(reportId);
     setView("reports");
@@ -1367,15 +1524,9 @@ function StudentDashboard({ student, token, onLogout, route = [], navigate = () 
     setActiveSection((prev) => (prev === key ? null : key));
   }
 
-  // Top summary click: always open the matching section (never toggle it shut).
-  // If it is already open, React would bail out of the identical state update and
-  // the scroll effect would never fire — so scroll straight away in that case.
+  // Top summary click: activate the matching section in place. The viewport is
+  // never moved — the dashboard just changes state where it stands.
   function openSectionFromSummary(key) {
-    if (activeSection === key) {
-      scrollToSection(key);
-      return;
-    }
-    pendingScroll.current = key;
     setActiveSection(key);
   }
 
@@ -1590,13 +1741,13 @@ function StudentDashboard({ student, token, onLogout, route = [], navigate = () 
                         items={items}
                         open={activeSection === g.key}
                         onToggle={() => toggleSection(g.key)}
-                        sectionRef={(node) => { sectionRefs.current[g.key] = node; }}
                         renderItem={(app) => (
                           <SdAppCard
                             key={app.id}
                             app={app}
                             report={reportByApplication[app.id]}
                             onOpenReport={openReport}
+                            onExpand={setDetailApp}
                           />
                         )}
                       />
@@ -1632,18 +1783,10 @@ function StudentDashboard({ student, token, onLogout, route = [], navigate = () 
                     </div>
 
                     {newestReport.improvements?.length ? (
-                      <div className="sd-card">
-                        <p className="sd-card-eyebrow">Fix these first</p>
-                        <div className="sd-fix-list">
-                          {newestReport.improvements.slice(0, 3).map((imp, i) => (
-                            <div className="sd-fix" key={i}>
-                              <span className={`sd-prio ${imp.priority}`}>{imp.priority === "high" ? "High" : imp.priority === "medium" ? "Med" : imp.priority}</span>
-                              <span>{imp.area}</span>
-                            </div>
-                          ))}
-                        </div>
-                        <button type="button" className="sd-btn-soft" onClick={() => setView("practice")}>Practice what you missed</button>
-                      </div>
+                      <button type="button" className="sd-btn-soft sd-fix-trigger" onClick={() => setFixOpen(true)}>
+                        <ListChecks size={16} /> Fix these first
+                        <span className="sd-fix-count">{newestReport.improvements.length}</span>
+                      </button>
                     ) : null}
                   </>
                 ) : (
@@ -1654,29 +1797,40 @@ function StudentDashboard({ student, token, onLogout, route = [], navigate = () 
                   </div>
                 )}
 
-                <div className="sd-card">
-                  <div className="sd-card-head">
-                    <p className="sd-card-eyebrow">Interview ready</p>
-                    <span className="sd-card-count">{shortlisted.length}</span>
-                  </div>
-                  {shortlisted.length ? (
-                    <div className="sd-ready-list">
-                      {shortlisted.slice(0, 5).map((app) => (
-                        <div className="sd-ready" key={app.id}>
-                          <span className="sd-ready-info">
-                            <strong>{app.company?.name || "Company"}</strong>
-                            <span>{app.opportunity?.role || "Role"}</span>
-                          </span>
-                          <span className="sd-ready-date">{app.applied_at ? formatDate(app.applied_at) : ""}</span>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="sd-empty-note">Shortlists will appear here.</p>
-                  )}
-                </div>
               </aside>
             </div>
+
+            {detailApp ? (
+              <SdAppDetailModal
+                app={detailApp}
+                report={reportByApplication[detailApp.id]}
+                onOpenReport={openReport}
+                onClose={() => setDetailApp(null)}
+              />
+            ) : null}
+
+            {fixOpen && newestReport?.improvements?.length ? (
+              <SdModal title="Fix these first" onClose={() => setFixOpen(false)}>
+                <div className="sd-fix-list">
+                  {newestReport.improvements.map((imp, i) => (
+                    <div className="sd-fix" key={i}>
+                      <span className={`sd-prio ${imp.priority}`}>{imp.priority === "high" ? "High" : imp.priority === "medium" ? "Med" : imp.priority}</span>
+                      <span>{imp.area}</span>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  className="sd-btn-soft"
+                  onClick={() => {
+                    setFixOpen(false);
+                    setView("practice");
+                  }}
+                >
+                  Practice what you missed
+                </button>
+              </SdModal>
+            ) : null}
           </>
         )}
       </section>
