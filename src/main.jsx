@@ -5314,11 +5314,13 @@ function AddCompaniesPanel({ adminToken, onImported }) {
       await onImported?.(result);
     } catch (err) {
       const resultData = err.data;
-      if (resultData?.opportunity_results) {
+      // Only show the results summary when the Master stage ran; if it failed
+      // nothing was synced and a "completed" banner would be misleading.
+      if (resultData?.opportunity_results && resultData.master?.status !== "FAILED") {
         setApplied({ incremental: true, result: resultData });
         await onImported?.(resultData);
       }
-      setError(`Incremental sync completed with failures. ${err.message || "Please check the sync details."}`);
+      setError(err.message || "Incremental sync failed.");
     } finally {
       setBusy(false);
     }
