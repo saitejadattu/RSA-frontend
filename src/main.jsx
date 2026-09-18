@@ -4722,7 +4722,7 @@ function CompanyDetailView({ adminToken, companyId, onBack, selectedOppId, onSel
             <Metric
               icon={<BadgeCheck size={20} />}
               label="Shortlisted"
-              value={selectedOppId ? (oppData?.opportunity?.shortlists_count ?? 0) : (stats.shortlisted_count ?? 0)}
+              value={selectedOppId ? (oppData?.stats?.shortlisted_count ?? 0) : (stats.shortlisted_count ?? 0)}
             />
             <Metric icon={<BarChart3 size={20} />} label="Responses" value={stats.response_count ?? 0} />
           </section>
@@ -4873,6 +4873,18 @@ const sheetApi = {
       method: "POST",
       adminToken,
       body: { url },
+    }),
+  fullSync: (adminToken, url) =>
+    apiRequest("/admin/sync/full", {
+      method: "POST",
+      adminToken,
+      body: { url },
+    }),
+  pasteSync: (adminToken, rawText, url) =>
+    apiRequest("/admin/sync/paste", {
+      method: "POST",
+      adminToken,
+      body: { raw_text: rawText, url: url || null },
     }),
   deleteOpportunity: (adminToken, opportunityId, reason) =>
     apiRequest(`/admin/opportunities/${opportunityId}`, {
@@ -5237,6 +5249,14 @@ function QuestionsPanel({ questions }) {
 /* --- Add companies: paste rows from the master tracker ------------- */
 const MASTER_URL_KEY = "rsa_master_sheet_url";
 
+// One cell of a master-row change, as the preview shows it. An empty cell reads
+// as "(empty)" so "filled in" and "changed" look different at a glance.
+function formatCellValue(value) {
+  if (value === null || value === undefined || value === "") return "(empty)";
+  const text = String(value);
+  return text.length > 60 ? `${text.slice(0, 60)}…` : text;
+}
+
 function AddCompaniesPanel({ adminToken, onImported }) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
@@ -5248,15 +5268,48 @@ function AddCompaniesPanel({ adminToken, onImported }) {
   const [error, setError] = useState("");
   const [syncMode, setSyncMode] = useState("full");
   const [confirmMode, setConfirmMode] = useState(null);
+  const [syncing, setSyncing] = useState(false);
+  const [warning, setWarning] = useState("");
 
   function reset() {
     setPreview(null);
     setApplied(null);
     setError("");
+    setWarning("");
   }
 
-  // Import from pasted text.
+  // Every sync - Pull only new, Fetch entire sheet, pasted rows - runs the same
+  // pipeline: Master rows first, then each opening's responses and shortlist.
+  // An error here means the Master stage failed and nothing was synced.
+  async function runSync(request, onDone) {
+    setBusy(true);
+    setSyncing(true);
+    setError("");
+    setWarning("");
+    try {
+      const result = await request();
+      setApplied({ result });
+      setPreview(null);
+      onDone?.();
+      if (result.status === "PARTIAL") {
+        setWarning(result.message || "Some openings could not be synced - see the sync results below.");
+      }
+      await onImported?.(result);
+    } catch (err) {
+      setError(err.message || "Sync failed.");
+    } finally {
+      setBusy(false);
+      setSyncing(false);
+    }
+  }
+
+  // Pasted Master rows. The header row is optional: copied rows get the header
+  // of the Master sheet link above. Confirming runs the full pipeline.
   async function run(confirm) {
+    if (confirm) {
+      await runSync(() => sheetApi.pasteSync(adminToken, text, url.trim()), () => setText(""));
+      return;
+    }
     setBusy(true);
     setError("");
     setFromUrl(false);
@@ -5264,17 +5317,10 @@ function AddCompaniesPanel({ adminToken, onImported }) {
       const result = await apiRequest("/admin/companies/import", {
         method: "POST",
         adminToken,
-        body: { raw_text: text, confirm },
+        body: { raw_text: text, confirm: false, url: url.trim() || null },
       });
-      if (confirm) {
-        setApplied(result);
-        setPreview(null);
-        setText("");
-        await onImported?.(result);
-      } else {
-        setPreview(result);
-        setApplied(null);
-      }
+      setPreview(result);
+      setApplied(null);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -5282,22 +5328,19 @@ function AddCompaniesPanel({ adminToken, onImported }) {
     }
   }
 
-  // Import by fetching the master sheet URL.
+  // Preview the whole Master sheet; confirming runs the full pipeline.
   async function runUrl(confirm) {
+    localStorage.setItem(MASTER_URL_KEY, url.trim());
+    if (confirm) {
+      await runSync(() => sheetApi.fullSync(adminToken, url.trim()));
+      return;
+    }
     setBusy(true);
     setError("");
     setFromUrl(true);
     try {
-      const result = await sheetApi.masterFetch(adminToken, url.trim(), confirm);
-      localStorage.setItem(MASTER_URL_KEY, url.trim());
-      if (confirm) {
-        setApplied(result);
-        setPreview(null);
-        await onImported?.(result);
-      } else {
-        setPreview(result);
-        setApplied(null);
-      }
+      setPreview(await sheetApi.masterFetch(adminToken, url.trim(), false));
+      setApplied(null);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -5305,25 +5348,9 @@ function AddCompaniesPanel({ adminToken, onImported }) {
     }
   }
 
-  async function runIncremental() {
-    setBusy(true);
-    setError("");
-    try {
-      const result = await sheetApi.incremental(adminToken, url.trim());
-      setApplied({ incremental: true, result });
-      await onImported?.(result);
-    } catch (err) {
-      const resultData = err.data;
-      // Only show the results summary when the Master stage ran; if it failed
-      // nothing was synced and a "completed" banner would be misleading.
-      if (resultData?.opportunity_results && resultData.master?.status !== "FAILED") {
-        setApplied({ incremental: true, result: resultData });
-        await onImported?.(resultData);
-      }
-      setError(err.message || "Incremental sync failed.");
-    } finally {
-      setBusy(false);
-    }
+  function runIncremental() {
+    localStorage.setItem(MASTER_URL_KEY, url.trim());
+    return runSync(() => sheetApi.incremental(adminToken, url.trim()));
   }
 
   function requestSync() {
@@ -5342,7 +5369,13 @@ function AddCompaniesPanel({ adminToken, onImported }) {
   }
 
   const counts = preview?.counts || {};
-  const incrementalResults = applied?.incremental ? (applied.result?.opportunity_results || []) : [];
+  const incrementalResults = applied?.result?.opportunity_results || [];
+  // Openings where something was imported or went wrong. The rest (already
+  // imported, no link, empty sheet) are only counted, so a full sync stays readable.
+  const activeResults = incrementalResults.filter(
+    (item) => item.response?.status !== "SKIPPED" || item.shortlist?.status !== "SKIPPED",
+  );
+  const quietCount = incrementalResults.length - activeResults.length;
   const responseSynced = incrementalResults.filter((item) => item.response?.status === "SUCCESS").length;
   const responseSkipped = incrementalResults.filter((item) => item.response?.status === "SKIPPED").length;
   const responseFailed = incrementalResults.filter((item) => item.response?.status === "FAILED").length;
@@ -5367,7 +5400,9 @@ function AddCompaniesPanel({ adminToken, onImported }) {
         <>
           <p className="rsa-hint">
             Pull the company master tracker from its Google Sheets link, or paste rows below. Each
-            row creates a company and its opening, or updates them if they already exist.
+            row creates a company and its opening, or updates them if they already exist — and an
+            opening you deleted comes back if the sheet still lists it. Responses and shortlists are
+            loaded for every opening in the same run; nothing needs Force by hand.
           </p>
 
           {!preview && !applied ? (
@@ -5398,12 +5433,12 @@ function AddCompaniesPanel({ adminToken, onImported }) {
             </div>
           </div>
 
-          {busy && syncMode === "incremental" ? (
+          {syncing ? (
             <div className="sync-progress" aria-live="polite">
               <strong>Sync Progress</strong>
               <span>● Master Sheet processing</span>
-              <span>● Processing newly discovered opportunities</span>
-              <span>● Response and Shortlist imports run in dependency order</span>
+              <span>● Loading responses for new and changed openings</span>
+              <span>● Shortlists load after their responses</span>
             </div>
           ) : null}
 
@@ -5428,26 +5463,37 @@ function AddCompaniesPanel({ adminToken, onImported }) {
 
           {error ? <StatusMessage error={error} /> : null}
 
+          {warning ? (
+            <div className="rsa-warning" style={{ marginBottom: 12 }}>
+              <TriangleAlert size={16} />
+              <span>{warning}</span>
+            </div>
+          ) : null}
+
           {applied ? (
             <div className="status success" style={{ marginBottom: 12 }}>
               <BadgeCheck size={18} />
               <span>
-                {applied.incremental
-                  ? `Incremental sync completed. Opportunities added: ${applied.result?.master?.created ?? 0}. Opportunities updated: ${applied.result?.master?.updated ?? 0}. Response synced: ${responseSynced}, skipped: ${responseSkipped}, failed: ${responseFailed}. Shortlist synced: ${shortlistSynced}, skipped: ${shortlistSkipped}, failed: ${shortlistFailed}.`
-                  : `Done — ${applied.counts.companies_new} new compan
-                {applied.counts.companies_new === 1 ? "y" : "ies"},{" "}
-                {applied.counts.opportunities_to_create} opening(s) created,{" "}
-                {applied.counts.opportunities_to_update} updated.`}
+                {`Sync completed. Opportunities added: ${applied.result?.master?.created ?? 0}. Restored: ${applied.result?.master?.restored ?? 0}. Updated: ${applied.result?.master?.updated ?? 0}. Unchanged: ${applied.result?.master?.unchanged ?? 0}. Response synced: ${responseSynced}, skipped: ${responseSkipped}, failed: ${responseFailed}. Shortlist synced: ${shortlistSynced}, skipped: ${shortlistSkipped}, failed: ${shortlistFailed}.`}
               </span>
             </div>
           ) : null}
 
-          {applied?.incremental && applied?.result?.opportunity_results?.length ? (
+          {activeResults.length ? (
             <div className="sync-results">
               <h3>Sync Results</h3>
-              {applied.result.opportunity_results.map((item) => (
+              {quietCount ? (
+                <p className="muted">{quietCount} other opening(s) had nothing new to import.</p>
+              ) : null}
+              {activeResults.map((item) => (
                 <div className={`sync-result ${item.response?.status === "FAILED" || item.shortlist?.status === "FAILED" ? "attention" : ""}`} key={item.opportunity_id}>
-                  <strong>{item.is_new ? "New opportunity" : "Existing opportunity"}: {item.opportunity_id}</strong>
+                  <strong>
+                    {item.is_new ? "New opening" : item.restored ? "Restored opening" : "Existing opening"}:{" "}
+                    {item.company ? `${item.company}${item.role ? ` · ${item.role}` : ""}` : item.opportunity_id}
+                  </strong>
+                  {item.restored ? (
+                    <span className="success-text">✓ Deleted earlier — restored, because the Master sheet still lists it</span>
+                  ) : null}
                   <span className={item.response?.status === "SUCCESS" ? "success-text" : "attention-text"}>
                     {item.response?.status === "SUCCESS" ? "✓ Response imported" : item.response?.status === "SKIPPED" ? `⚠ ${item.response.reason}` : `✗ Response import failed: ${item.response?.error || "unknown error"}`}
                   </span>
@@ -5483,6 +5529,10 @@ function AddCompaniesPanel({ adminToken, onImported }) {
                 <div><span>New companies</span><strong>{counts.companies_new ?? 0}</strong></div>
                 <div><span>Openings to create</span><strong>{counts.opportunities_to_create ?? 0}</strong></div>
                 <div><span>Openings to update</span><strong>{counts.opportunities_to_update ?? 0}</strong></div>
+                {counts.opportunities_to_restore ? (
+                  <div><span>To restore</span><strong>{counts.opportunities_to_restore}</strong></div>
+                ) : null}
+                <div><span>Unchanged</span><strong>{counts.opportunities_unchanged ?? 0}</strong></div>
                 {counts.skipped ? <div><span>Skipped</span><strong>{counts.skipped}</strong></div> : null}
               </div>
 
@@ -5494,7 +5544,7 @@ function AddCompaniesPanel({ adminToken, onImported }) {
                   <div className="rsa-warning rsa-changed" style={{ marginBottom: 12 }}>
                     <RefreshCw size={16} />
                     <div>
-                      <strong>Sheet links changed — after confirming, open these and Sync from sheets:</strong>
+                      <strong>Sheet links changed — confirming re-pulls these sheets automatically:</strong>
                       <ul>
                         {changed.map((r) => (
                           <li key={r.row}>
@@ -5527,21 +5577,49 @@ function AddCompaniesPanel({ adminToken, onImported }) {
                 ) : null;
               })()}
 
-              <div className="rsa-preview-table">
-                {(preview.rows || []).map((row) => (
-                  <div className="rsa-preview-row" key={row.row}>
-                    <span className="muted">{row.row}</span>
-                    <div>
-                      <strong>{row.company || "(no company)"}</strong>
-                      <span>{row.role}{row.received_on ? ` · ${row.received_on}` : ""}</span>
+              {(() => {
+                // What this sync will actually change. Rows that match the
+                // database exactly are counted above but not listed here.
+                const touched = (preview.rows || []).filter((r) => r.action !== "unchanged");
+                const unchangedCount = (preview.rows || []).length - touched.length;
+                return (
+                  <>
+                    {unchangedCount ? (
+                      <p className="muted" style={{ marginBottom: 8 }}>
+                        {unchangedCount} row(s) match the database exactly and are not listed — their
+                        responses and shortlists are still synced.
+                      </p>
+                    ) : null}
+                    <div className="rsa-preview-table">
+                      {touched.map((row) => (
+                        <div className="rsa-preview-row" key={row.row}>
+                          <span className="muted">{row.row}</span>
+                          <div>
+                            <strong>{row.company || "(no company)"}</strong>
+                            <span>{row.role}{row.received_on ? ` · ${row.received_on}` : ""}</span>
+                            {row.changes?.length ? (
+                              <ul className="rsa-change-list">
+                                {row.changes.map((change) => (
+                                  <li key={change.field}>
+                                    {change.field.replaceAll("_", " ")}:{" "}
+                                    <span className="rsa-change-old">{formatCellValue(change.old)}</span>
+                                    {" → "}
+                                    <span className="rsa-change-new">{formatCellValue(change.new)}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : null}
+                          </div>
+                          <span className={`status-pill ${row.action === "skip" ? "bad" : row.action.includes("create") ? "neutral" : "good"}`}>
+                            {row.action.replaceAll("_", " ").replace("opportunity", "opening")}
+                          </span>
+                          <span className="muted">{row.company_new ? "new company" : row.reason || ""}</span>
+                        </div>
+                      ))}
                     </div>
-                    <span className={`status-pill ${row.action === "skip" ? "bad" : row.action.includes("create") ? "neutral" : "good"}`}>
-                      {row.action.replaceAll("_", " ").replace("opportunity", "opening")}
-                    </span>
-                    <span className="muted">{row.company_new ? "new company" : row.reason || ""}</span>
-                  </div>
-                ))}
-              </div>
+                  </>
+                );
+              })()}
 
               <div className="rsa-actions">
                 <button className="back-button" type="button" onClick={reset} disabled={busy}>
@@ -6761,7 +6839,7 @@ function OpportunityDetail({ detail, adminToken, opportunityId, onRefresh }) {
     ["Eligible (as per pref)", o.eligible_as_per_pref],
     ["Filled form", o.filled_form_count],
     ["Interested", o.interested_count],
-    ["Shortlists (CRM)", o.shortlists_count],
+    ["Shortlists (CRM)", o.master_shortlists_count ?? o.shortlists_count],
     ["Date of sharing profiles", o.date_of_sharing_profiles],
   ];
 
@@ -6792,9 +6870,15 @@ function OpportunityDetail({ detail, adminToken, opportunityId, onRefresh }) {
   return (
     <>
       <section className="stats-grid admin-stats">
-        <Metric icon={<UsersRound size={20} />} label="Applied" value={o.application_count ?? 0} />
-        <Metric icon={<BadgeCheck size={20} />} label="Shortlisted" value={o.shortlists_count ?? 0} />
-        <Metric icon={<XCircle size={20} />} label="Rejected" value={stats.rejected_count ?? 0} />
+        {/* Every card counts this opening's own applications, so they always add
+            up against the applicant list below. */}
+        <Metric icon={<UsersRound size={20} />} label="Applied" value={stats.applied_count ?? o.application_count ?? 0} />
+        <Metric icon={<BadgeCheck size={20} />} label="Shortlisted" value={stats.shortlisted_count ?? 0} />
+        <Metric
+          icon={<XCircle size={20} />}
+          label="Not shortlisted"
+          value={(stats.not_shortlisted_count ?? 0) + (stats.rejected_count ?? 0)}
+        />
         <Metric icon={<BarChart3 size={20} />} label="Responses" value={stats.response_count ?? 0} />
       </section>
 
