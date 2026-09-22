@@ -55,29 +55,87 @@ p {
   margin: 0;
 }
 
-.auth-brand h1 {
-  font-size: 24px;
-  line-height: 1.15;
+/* ----------------------------- Authentication ----------------------------- */
+.auth-page {
+  min-height: 100vh;
+  width: 100%;
+  display: grid;
+  place-items: center;
+  padding: 32px 20px;
+  background: #f4f6f8;
 }
 
-.auth-brand p,
-.reset-header p,
-.empty-state p,
-.profile-list span,
-.metric p,
-.eyebrow {
-  color: #65717e;
+.auth-panel {
+  width: min(100%, 430px);
+  padding: 32px;
+  background: #fff;
+  border: 1px solid #dfe4ea;
+  border-radius: 16px;
+  box-shadow: 0 14px 40px rgba(15, 23, 42, 0.08);
+}
+
+.auth-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  margin-bottom: 28px;
+}
+
+.auth-brand .brand-mark {
+  width: 52px;
+  height: 52px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  margin-bottom: 14px;
+  box-shadow: 0 8px 18px rgba(15, 118, 110, 0.16);
+}
+
+.auth-brand h1 {
+  font-size: 26px;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
 }
 
 .auth-brand p {
   margin-top: 8px;
   font-size: 14px;
   line-height: 1.5;
+  color: #65717e;
 }
 
 .auth-form {
   display: grid;
-  gap: 16px;
+  gap: 18px;
+}
+
+.auth-form label {
+  display: grid;
+  gap: 7px;
+}
+
+.auth-form label > span {
+  color: #344054;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.auth-form .primary-button {
+  width: 100%;
+  margin-top: 2px;
+}
+
+.auth-panel .status {
+  margin-top: -2px;
+}
+
+.reset-header p,
+.empty-state p,
+.profile-list span,
+.metric p,
+.eyebrow {
+  color: #65717e;
 }
 
 label {
@@ -2627,6 +2685,30 @@ input:focus {
   font-size: 12px;
 }
 
+/* the columns one master row changes, listed under the opening it belongs to */
+.rsa-change-list {
+  margin: 4px 0 0;
+  padding-left: 14px;
+  display: grid;
+  gap: 2px;
+  font-size: 11.5px;
+  color: #64748b;
+}
+
+.rsa-change-list li {
+  overflow-wrap: anywhere;
+}
+
+.rsa-change-old {
+  color: #b91c1c;
+  text-decoration: line-through;
+}
+
+.rsa-change-new {
+  color: #15803d;
+  font-weight: 600;
+}
+
 /* topic groups */
 .rsa-group {
   margin-bottom: 16px;
@@ -4479,6 +4561,11 @@ input:focus {
   box-shadow: var(--wk-shadow-xs);
 }
 
+/* a stage with no applications has no section to open */
+.sd-stage:disabled {
+  cursor: default;
+}
+
 .sd-stage-label {
   display: flex;
   align-items: center;
@@ -4516,11 +4603,16 @@ input:focus {
   grid-template-columns: minmax(0, 1.65fr) minmax(300px, 1fr);
   gap: 20px;
   align-items: start;
+  min-height: 0;
 }
 
 .sd-groups {
   display: grid;
   gap: 12px;
+  align-content: start;
+  /* lets the column shrink inside the grid so an inner scroll area can work */
+  min-height: 0;
+  min-width: 0;
 }
 
 /* application groups */
@@ -4542,6 +4634,25 @@ input:focus {
   background: transparent;
   cursor: pointer;
   text-align: left;
+}
+
+/* the summary cards scroll the section to the top of the viewport, so keep a
+   little breathing room above it */
+.sd-group {
+  scroll-margin-top: 16px;
+}
+
+/* title over supporting line, so a full sentence of supporting copy wraps
+   cleanly instead of fighting the title for room on one row */
+.sd-group-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.sd-group-head .sd-chip {
+  flex: 0 0 auto;
 }
 
 .sd-group-head:hover {
@@ -4571,6 +4682,23 @@ input:focus {
   padding: 8px;
   display: grid;
   gap: 8px;
+  align-content: start;
+}
+
+/* Only a list that both overflows and has usable room gets .is-scroll.
+   --sd-list-max is measured in JS from the real cards and the space actually left
+   in the viewport, and always lands on a card boundary — there is no fixed pixel
+   height and no viewport guess here. Without the class the list keeps its natural
+   height and the page flows, which is what happens on very short screens.
+   overscroll-behavior stops the scroll chaining to the page at either end. */
+.sd-group-body.is-scroll {
+  /* the var is set once the list has been measured; until then the list keeps its
+     natural height, but the gutter below is already reserved so the measurement
+     happens at the width the list will actually have */
+  max-height: var(--sd-list-max, none);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 /* chips + pills */
@@ -4691,6 +4819,34 @@ input:focus {
   background: #e3efed;
 }
 
+/* fullscreen/expand control — an additional action, styled to sit quietly beside
+   the existing card icons until hovered or focused */
+.sd-app-expand {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  border: 1px solid #eef1f1;
+  border-radius: 8px;
+  background: #fff;
+  color: #667085;
+  cursor: pointer;
+}
+
+.sd-app-expand:hover {
+  border-color: #cfe4e0;
+  background: #f0f7f6;
+  color: #0f766e;
+}
+
+.sd-app-expand:focus-visible,
+.sd-modal-close:focus-visible {
+  outline: 2px solid #0f766e;
+  outline-offset: 2px;
+}
+
 .sd-remark {
   margin-top: 12px;
   display: flex;
@@ -4717,8 +4873,184 @@ input:focus {
 .sd-side {
   display: grid;
   gap: 12px;
+  align-content: start;
+  min-height: 0;
+  min-width: 0;
   position: sticky;
   top: 28px;
+  /* keeps coaching feedback inside the viewport instead of stretching the page;
+     it scrolls internally only when its own content is genuinely long */
+  max-height: calc(100vh - 56px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* compact trigger that replaced the permanent "Fix these first" panel */
+.sd-fix-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.sd-fix-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #e8f4f2;
+  color: #0f766e;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* ---------- popup ---------- */
+.sd-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(16, 24, 40, 0.42);
+  /* the dashboard keeps its scroll position while the popup is open */
+  overscroll-behavior: contain;
+}
+
+.sd-modal {
+  width: min(460px, 100%);
+  /* viewport-relative, so the dialog never outgrows the screen it opens on */
+  max-height: min(560px, calc(100vh - 32px));
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: #fff;
+  border: 1px solid #e6ebea;
+  border-radius: 12px;
+  box-shadow: var(--wk-shadow-sm);
+  overflow: hidden;
+}
+
+.sd-modal.is-wide {
+  width: min(560px, 100%);
+}
+
+/* the expanded application view */
+.sd-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.sd-detail-role {
+  font-size: 14px;
+  font-weight: 600;
+  color: #101828;
+}
+
+.sd-detail-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid #eef1f1;
+  border-radius: 10px;
+  background: #fcfdfd;
+}
+
+.sd-detail-fact {
+  min-width: 0;
+}
+
+.sd-detail-fact dt {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #667085;
+}
+
+.sd-detail-fact dd {
+  margin-top: 3px;
+  font-size: 13px;
+  color: #101828;
+  overflow-wrap: anywhere;
+}
+
+.sd-detail-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sd-detail-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border: 1px solid #cfe4e0;
+  border-radius: 8px;
+  background: #f0f7f6;
+  color: #0f766e;
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.sd-detail-links a:hover {
+  background: #e3efed;
+}
+
+.sd-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px;
+  border-bottom: 1px solid #eef1f1;
+  flex: 0 0 auto;
+}
+
+.sd-modal-head h3 {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: #101828;
+}
+
+.sd-modal-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #667085;
+  cursor: pointer;
+}
+
+.sd-modal-close:hover {
+  background: #f2f4f7;
+  color: #101828;
+}
+
+/* the body is the part that scrolls, so long content never grows the dialog */
+.sd-modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 16px 18px 18px;
+  display: grid;
+  gap: 14px;
+  align-content: start;
 }
 
 .sd-coach {
@@ -5291,8 +5623,11 @@ input:focus {
   .sd-grid {
     grid-template-columns: 1fr;
   }
+  /* stacked: the coaching column flows with the page instead of being pinned */
   .sd-side {
     position: static;
+    max-height: none;
+    overflow: visible;
   }
   .sd-stages {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -5306,6 +5641,32 @@ input:focus {
    (both are .dashboard-shell.sd-shell).
    ============================================================ */
 @media (max-width: 640px) {
+  /* popups use nearly the full width but keep a safe margin */
+  .sd-modal-backdrop {
+    padding: 12px;
+    align-items: end;
+  }
+  .sd-modal,
+  .sd-modal.is-wide {
+    width: 100%;
+    max-height: calc(100vh - 24px);
+  }
+  .sd-detail-facts {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  /* narrow screens: let the chip sit above the heading instead of squeezing it */
+  .sd-group-head {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 8px 10px;
+    padding: 14px 16px;
+  }
+  .sd-group-body {
+    padding: 8px 6px;
+  }
+
   /* one column + room so content clears the fixed bottom bar */
   .dashboard-shell { grid-template-columns: 1fr; }
   .dashboard-shell .dashboard-main {

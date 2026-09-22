@@ -42,8 +42,10 @@ import {
   Trash2,
   TriangleAlert,
   Upload,
+  Maximize2,
   Wand2,
   Pencil,
+  X,
 } from "lucide-react";
 import "./styles.css";
 
@@ -972,13 +974,332 @@ function studentStatusInfo(app) {
   return { key: "applied", label: "Applied", cls: "neutral" };
 }
 
+// Section labels are user-facing only. `key` still matches the bucket key derived
+// from studentStatusInfo(), so the underlying status values are untouched:
+// "not_shortlisted" is displayed as "Next Steps" but stored/derived exactly as before.
+// `subText`, when present, replaces the default "<count> <sub>" summary line.
 const SD_GROUPS = [
   { key: "interviewing", title: "Interviewing", chipLabel: "Now", chipCls: "warn", sub: "feedback may be ready" },
   { key: "shortlisted", title: "Shortlisted", chipLabel: "Good news", chipCls: "good", sub: "companies want to talk to you" },
   { key: "applied", title: "Applied · waiting to hear back", chipLabel: "Waiting", chipCls: "neutral", sub: "companies" },
-  { key: "not_shortlisted", title: "Not shortlisted", chipLabel: "Closed", chipCls: "bad", sub: "profile wasn't taken forward — read the note and update" },
+  {
+    key: "not_shortlisted",
+    title: "Next Steps",
+    chipLabel: "Next",
+    chipCls: "neutral",
+    sub: "to learn from",
+    subText: "These opportunities didn't move forward this time — use the feedback to prepare for the next one.",
+  },
   { key: "declined", title: "Not interested", chipLabel: "Closed", chipCls: "muted", sub: "you declined" },
 ];
+
+// Target number of complete cards when there is room for them.
+const SD_VISIBLE_CARDS = 4;
+// Floor for a constrained list. A section low in the column, or a short screen,
+// can leave less room than this — the list still stops here rather than growing
+// unbounded, and the page scrolls the last card or two into view naturally.
+const SD_MIN_CARDS = 2;
+// Breathing room kept below an open list so it never runs into the viewport edge.
+const SD_LIST_BOTTOM_GAP = 24;
+
+// Single source of truth for what is known about an application. The collapsed
+// card's meta line and the expanded detail popup are both built from these, so a
+// field can never show in one view and go missing from the other. Nothing here is
+// derived or invented — every value already exists on the application payload.
+const SD_APP_LINKS = [
+  ["Resume", "resume_link", FileText],
+  ["Project", "project_link", Code],
+  ["GitHub", "github_link", Github],
+];
+
+function sdAppLinks(app) {
+  return SD_APP_LINKS.map(([label, key, Icon]) => [label, app[key], Icon]).filter(([, href]) => Boolean(href));
+}
+
+function sdAppFacts(app) {
+  const opp = app.opportunity || {};
+  return [
+    ["Location", opp.location],
+    ["Stipend", opp.stipend],
+    ["Duration", opp.duration],
+    ["Applied", app.applied_at ? formatDate(app.applied_at) : null],
+    ["Skills", opp.tech_stack || opp.must_have_skills],
+  ].filter(([, value]) => Boolean(value));
+}
+
+// The card's one-line summary, rendered from the same facts the popup lists.
+function sdAppMetaLine(app) {
+  return sdAppFacts(app)
+    .filter(([label]) => label !== "Skills")
+    // only Stipend and Applied carry their label inline, exactly as before
+    .map(([label, value]) => (label === "Stipend" || label === "Applied" ? `${label} ${value}` : value))
+    .join(" · ");
+}
+
+// The application card. Hoisted to module scope so it keeps a stable component
+// identity across StudentDashboard re-renders — a card that remounts would reset
+// the scroll position of the list it sits in.
+function SdAppCard({ app, report, onOpenReport, onExpand }) {
+  const info = studentStatusInfo(app);
+  const opp = app.opportunity || {};
+  const links = sdAppLinks(app);
+  const meta = sdAppMetaLine(app);
+  return (
+    <div className="sd-app">
+      <div className="sd-app-top">
+        <div className="sd-app-info">
+          <div className="sd-app-title">
+            <strong>{app.company?.name || "Company"}</strong>
+            <span className={`sd-pill ${info.cls}`}>{info.label}</span>
+          </div>
+          <p className="sd-app-role">
+            {opp.role || "Role not mapped"}
+            {opp.tech_stack || opp.must_have_skills ? ` · ${opp.tech_stack || opp.must_have_skills}` : ""}
+          </p>
+          {meta ? <p className="sd-app-meta">{meta}</p> : null}
+        </div>
+        <div className="sd-app-actions">
+          {links.length ? (
+            <div className="sd-links">
+              {links.map(([label, href, Icon]) => (
+                <a key={label} href={href} target="_blank" rel="noreferrer" title={label}>
+                  <Icon size={17} />
+                </a>
+              ))}
+            </div>
+          ) : null}
+          {report ? (
+            <button type="button" className="sd-read-fb" onClick={() => onOpenReport(report.id)}>
+              <FileText size={14} /> Read feedback
+            </button>
+          ) : null}
+          {onExpand ? (
+            <button
+              type="button"
+              className="sd-app-expand"
+              aria-label={`View application details for ${app.company?.name || "this company"}`}
+              title="View application details"
+              onClick={() => onExpand(app)}
+            >
+              <Maximize2 size={16} />
+            </button>
+          ) : null}
+        </div>
+      </div>
+      {app.screening_remark ? (
+        <div className="sd-remark">
+          <AlertCircle size={15} />
+          <p><strong>Note from the company</strong> — {app.screening_remark}</p>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// The scroll region shared by every accordion section. It sizes itself from two
+// live measurements rather than any fixed pixel value: the real height of the
+// cards, and the space actually left below the list in the viewport. It then cuts
+// on a card boundary — SD_VISIBLE_CARDS where there is room, fewer on a short
+// screen, and not at all when even SD_MIN_CARDS will not fit (there the page just
+// flows). A card is therefore never sliced in half at any viewport size.
+function SdScrollList({ scrollKey, itemCount, children }) {
+  const listRef = useRef(null);
+  const [maxHeight, setMaxHeight] = useState(null);
+
+  useLayoutEffect(() => {
+    const el = listRef.current;
+    if (!el || itemCount <= SD_VISIBLE_CARDS) {
+      setMaxHeight(null);
+      return undefined;
+    }
+    const measure = () => {
+      const cards = Array.from(el.children);
+      if (cards.length <= SD_VISIBLE_CARDS) {
+        setMaxHeight(null);
+        return;
+      }
+      const cs = window.getComputedStyle(el);
+      const padBottom = parseFloat(cs.paddingBottom) || 0;
+      const rect = el.getBoundingClientRect();
+
+      // Height of the list if it were cut just under card i. Read off live layout
+      // rather than summed, so it picks up the container border, top padding, row
+      // gaps, and any card taller than its neighbours. Adding padding-bottom lands
+      // the cut inside the gap before card i+1, so nothing peeks through.
+      const edgeAfter = (i) =>
+        cards[i].getBoundingClientRect().bottom - rect.top + el.scrollTop + padBottom;
+
+      // Space between the top of the list and the bottom of the viewport, measured
+      // from the document so it does not drift as the page scrolls.
+      const available = window.innerHeight - (rect.top + window.scrollY) - SD_LIST_BOTTOM_GAP;
+      const ideal = edgeAfter(SD_VISIBLE_CARDS - 1);
+
+      let next;
+      if (available >= ideal) {
+        // Room for the full target: show exactly SD_VISIBLE_CARDS.
+        next = ideal;
+      } else {
+        // Tighter spot — a short screen, or a section sitting low in the column.
+        // Step down to the last card that still fits whole, but never below the
+        // SD_MIN_CARDS floor: an unconstrained list here is what makes the page
+        // grow without bound, which is the thing this is here to prevent.
+        let fits = -1;
+        for (let i = 0; i < cards.length; i += 1) {
+          if (edgeAfter(i) <= available) fits = i; else break;
+        }
+        next = edgeAfter(Math.max(fits, SD_MIN_CARDS - 1));
+      }
+
+      const rounded = Math.round(next);
+      setMaxHeight((prev) => (prev === rounded ? prev : rounded));
+    };
+    measure();
+    // Re-measure when the viewport changes: available space drives the height.
+    window.addEventListener("resize", measure);
+    let ro;
+    if (typeof ResizeObserver !== "undefined") {
+      // Observe the cards, not the container: measuring off the container would
+      // feed its own max-height back into the observer.
+      ro = new ResizeObserver(measure);
+      Array.from(el.children).forEach((card) => ro.observe(card));
+    }
+    return () => {
+      window.removeEventListener("resize", measure);
+      if (ro) ro.disconnect();
+    };
+  }, [itemCount, children]);
+
+  // Whether the list will scroll is known from the item count alone, so the
+  // scroll styling (and with it the reserved scrollbar gutter) is applied on the
+  // first render — before measuring. Measuring at the final content width matters:
+  // reserving the gutter afterwards would re-wrap the card text, make the cards
+  // taller, and leave the height we just computed cutting through a card.
+  const scrolls = itemCount > SD_VISIBLE_CARDS;
+  return (
+    <div
+      ref={listRef}
+      className={`sd-group-body${scrolls ? " is-scroll" : ""}`}
+      data-scroll-key={scrolls ? scrollKey : undefined}
+      style={maxHeight == null ? undefined : { "--sd-list-max": `${maxHeight}px` }}
+    >
+      {children}
+    </div>
+  );
+}
+
+// The expanded view of one application card. It shows the same fields the card is
+// built from (via sdAppFacts / sdAppLinks) with room to display them in full, so
+// it reads as the same card opened up rather than a different screen.
+function SdAppDetailModal({ app, report, onOpenReport, onClose }) {
+  const info = studentStatusInfo(app);
+  const opp = app.opportunity || {};
+  const facts = sdAppFacts(app);
+  const links = sdAppLinks(app);
+  return (
+    <SdModal wide title={app.company?.name || "Company"} onClose={onClose}>
+      <div className="sd-detail-head">
+        <p className="sd-detail-role">{opp.role || "Role not mapped"}</p>
+        <span className={`sd-pill ${info.cls}`}>{info.label}</span>
+      </div>
+
+      <dl className="sd-detail-facts">
+        {facts.map(([label, value]) => (
+          <div className="sd-detail-fact" key={label}>
+            <dt>{label}</dt>
+            <dd>{value}</dd>
+          </div>
+        ))}
+      </dl>
+
+      {app.screening_remark ? (
+        <div className="sd-remark">
+          <AlertCircle size={15} />
+          <p><strong>Note from the company</strong> — {app.screening_remark}</p>
+        </div>
+      ) : null}
+
+      {links.length ? (
+        <div className="sd-detail-links">
+          {links.map(([label, href, Icon]) => (
+            <a key={label} href={href} target="_blank" rel="noreferrer">
+              <Icon size={15} /> {label}
+            </a>
+          ))}
+        </div>
+      ) : null}
+
+      {report ? (
+        <button
+          type="button"
+          className="sd-btn-soft"
+          onClick={() => {
+            onClose();
+            onOpenReport(report.id);
+          }}
+        >
+          <FileText size={15} /> Read feedback
+        </button>
+      ) : (
+        <p className="sd-empty-note">Interview feedback will appear here once it is published.</p>
+      )}
+    </SdModal>
+  );
+}
+
+// Centred popup used for panels that do not earn permanent dashboard space.
+// Closes on the X, on a backdrop click and on Escape; the body scrolls internally
+// so long content never grows the dialog past the viewport.
+function SdModal({ title, onClose, children, wide = false }) {
+  useEffect(() => {
+    const onKey = (event) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="sd-modal-backdrop"
+      role="presentation"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div className={`sd-modal${wide ? " is-wide" : ""}`} role="dialog" aria-modal="true" aria-label={title}>
+        <div className="sd-modal-head">
+          <h3>{title}</h3>
+          <button type="button" className="sd-modal-close" onClick={onClose} aria-label="Close">
+            <X size={18} />
+          </button>
+        </div>
+        <div className="sd-modal-body">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+// One accordion section. Every section renders through this, so the header, the
+// caret and the scroll behaviour live in a single place.
+function SdAccordionSection({ group, items, open, onToggle, renderItem }) {
+  return (
+    <div className="sd-group">
+      <button type="button" className="sd-group-head" aria-expanded={open} onClick={onToggle}>
+        <span className={`sd-chip ${group.chipCls}`}>{group.chipLabel}</span>
+        <span className="sd-group-heading">
+          <span className="sd-group-title">{group.title}</span>
+          <span className="sd-group-sub">{group.subText || `${items.length} ${group.sub}`}</span>
+        </span>
+        <span className="sd-caret">{open ? <ChevronDown size={18} /> : <ChevronRight size={18} />}</span>
+      </button>
+      {open ? (
+        <SdScrollList scrollKey={`sd-group-${group.key}`} itemCount={items.length}>
+          {items.map(renderItem)}
+        </SdScrollList>
+      ) : null}
+    </div>
+  );
+}
 
 function StudentIssuesView({ token }) {
   const [issues, setIssues] = useState([]);
@@ -1101,7 +1422,14 @@ function StudentDashboard({ student, token, onLogout, route = [], navigate = () 
   const [issueBusy, setIssueBusy] = useState(false);
   const [issueError, setIssueError] = useState("");
   const [issueSuccess, setIssueSuccess] = useState("");
-  const [openGroups, setOpenGroups] = useState({ interviewing: true, shortlisted: true, applied: false, declined: false });
+  // One shared accordion slot: exactly one detail section is open at a time, and
+  // null means every section starts closed.
+  const [activeSection, setActiveSection] = useState(null);
+  // Opening a section is a pure state change — no scrolling, no viewport movement.
+  const [fixOpen, setFixOpen] = useState(false);
+  // Held separately from activeSection, so expanding a card cannot disturb which
+  // accordion is open or where the page is scrolled.
+  const [detailApp, setDetailApp] = useState(null);
 
   useEffect(() => {
     let isCurrent = true;
@@ -1150,10 +1478,10 @@ function StudentDashboard({ student, token, onLogout, route = [], navigate = () 
     return map;
   }, [reports]);
 
-  function openReport(reportId) {
+  const openReport = useCallback((reportId) => {
     setFocusReportId(reportId);
     setView("reports");
-  }
+  }, [setView]);
 
   const initials = useMemo(() => {
     return (student.name || "")
@@ -1191,8 +1519,15 @@ function StudentDashboard({ student, token, onLogout, route = [], navigate = () 
     ? `${shortlisted.length} ${shortlisted.length === 1 ? "company has" : "companies have"} shortlisted you${reports.length ? ", and you have new coaching feedback." : "."}`
     : "Here's where your applications stand.";
 
-  function toggleGroup(key) {
-    setOpenGroups((prev) => ({ ...prev, [key]: !prev[key] }));
+  // Header click: open a closed section, close the open one.
+  function toggleSection(key) {
+    setActiveSection((prev) => (prev === key ? null : key));
+  }
+
+  // Top summary click: activate the matching section in place. The viewport is
+  // never moved — the dashboard just changes state where it stands.
+  function openSectionFromSummary(key) {
+    setActiveSection(key);
   }
 
   function closeIssue() {
@@ -1228,64 +1563,6 @@ function StudentDashboard({ student, token, onLogout, route = [], navigate = () 
     } finally {
       setIssueBusy(false);
     }
-  }
-
-  function AppCard({ app }) {
-    const info = studentStatusInfo(app);
-    const opp = app.opportunity || {};
-    const report = reportByApplication[app.id];
-    const links = [
-      ["Resume", app.resume_link, FileText],
-      ["Project", app.project_link, Code],
-      ["GitHub", app.github_link, Github],
-    ].filter(([, href]) => Boolean(href));
-    const meta = [
-      opp.location,
-      opp.stipend ? `Stipend ${opp.stipend}` : null,
-      opp.duration,
-      app.applied_at ? `Applied ${formatDate(app.applied_at)}` : null,
-    ]
-      .filter(Boolean)
-      .join(" · ");
-    return (
-      <div className="sd-app">
-        <div className="sd-app-top">
-          <div className="sd-app-info">
-            <div className="sd-app-title">
-              <strong>{app.company?.name || "Company"}</strong>
-              <span className={`sd-pill ${info.cls}`}>{info.label}</span>
-            </div>
-            <p className="sd-app-role">
-              {opp.role || "Role not mapped"}
-              {opp.tech_stack || opp.must_have_skills ? ` · ${opp.tech_stack || opp.must_have_skills}` : ""}
-            </p>
-            {meta ? <p className="sd-app-meta">{meta}</p> : null}
-          </div>
-          <div className="sd-app-actions">
-            {links.length ? (
-              <div className="sd-links">
-                {links.map(([label, href, Icon]) => (
-                  <a key={label} href={href} target="_blank" rel="noreferrer" title={label}>
-                    <Icon size={17} />
-                  </a>
-                ))}
-              </div>
-            ) : null}
-            {report ? (
-              <button type="button" className="sd-read-fb" onClick={() => openReport(report.id)}>
-                <FileText size={14} /> Read feedback
-              </button>
-            ) : null}
-          </div>
-        </div>
-        {app.screening_remark ? (
-          <div className="sd-remark">
-            <AlertCircle size={15} />
-            <p><strong>Note from the company</strong> — {app.screening_remark}</p>
-          </div>
-        ) : null}
-      </div>
-    );
   }
 
   return (
@@ -1422,24 +1699,32 @@ function StudentDashboard({ student, token, onLogout, route = [], navigate = () 
             <section className="sd-stage-bar">
               <div className="sd-stage-head">
                 <h2>Where your {applications.length} application{applications.length === 1 ? "" : "s"} stand</h2>
-                <span>Tap a stage to jump to it</span>
+                <span>Tap a stage to open it below</span>
               </div>
               <div className="sd-stages">
-                {stages.map((stage) => (
-                  <button
-                    type="button"
-                    key={stage.key}
-                    className={`sd-stage ${stage.key !== "feedback" && openGroups[stage.key] ? "on" : ""}`}
-                    onClick={() => (stage.key === "feedback" ? setView("reports") : toggleGroup(stage.key))}
-                  >
-                    <span className="sd-stage-label">
-                      <i style={{ background: stage.color }} /> {stage.label}
-                    </span>
-                    <span className="sd-stage-count">
-                      <strong>{stage.count}</strong> {stage.note}
-                    </span>
-                  </button>
-                ))}
+                {stages.map((stage) => {
+                  // "Feedback ready" keeps its existing behaviour (it opens the
+                  // feedback view, it is not an application-stage accordion).
+                  const navigates = stage.key !== "feedback";
+                  const isOpen = navigates && activeSection === stage.key;
+                  return (
+                    <button
+                      type="button"
+                      key={stage.key}
+                      className={`sd-stage ${isOpen ? "on" : ""}`}
+                      aria-expanded={navigates ? isOpen : undefined}
+                      disabled={navigates && stage.count === 0}
+                      onClick={() => (navigates ? openSectionFromSummary(stage.key) : setView("reports"))}
+                    >
+                      <span className="sd-stage-label">
+                        <i style={{ background: stage.color }} /> {stage.label}
+                      </span>
+                      <span className="sd-stage-count">
+                        <strong>{stage.count}</strong> {stage.note}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             </section>
 
@@ -1449,21 +1734,23 @@ function StudentDashboard({ student, token, onLogout, route = [], navigate = () 
                   SD_GROUPS.map((g) => {
                     const items = groups[g.key];
                     if (!items.length) return null;
-                    const open = openGroups[g.key];
                     return (
-                      <div className="sd-group" key={g.key}>
-                        <button type="button" className="sd-group-head" onClick={() => toggleGroup(g.key)}>
-                          <span className={`sd-chip ${g.chipCls}`}>{g.chipLabel}</span>
-                          <span className="sd-group-title">{g.title}</span>
-                          <span className="sd-group-sub">{items.length} {g.sub}</span>
-                          <span className="sd-caret">{open ? <ChevronDown size={18} /> : <ChevronRight size={18} />}</span>
-                        </button>
-                        {open ? (
-                          <div className="sd-group-body">
-                            {items.map((app) => <AppCard key={app.id} app={app} />)}
-                          </div>
-                        ) : null}
-                      </div>
+                      <SdAccordionSection
+                        key={g.key}
+                        group={g}
+                        items={items}
+                        open={activeSection === g.key}
+                        onToggle={() => toggleSection(g.key)}
+                        renderItem={(app) => (
+                          <SdAppCard
+                            key={app.id}
+                            app={app}
+                            report={reportByApplication[app.id]}
+                            onOpenReport={openReport}
+                            onExpand={setDetailApp}
+                          />
+                        )}
+                      />
                     );
                   })
                 ) : (
@@ -1496,18 +1783,10 @@ function StudentDashboard({ student, token, onLogout, route = [], navigate = () 
                     </div>
 
                     {newestReport.improvements?.length ? (
-                      <div className="sd-card">
-                        <p className="sd-card-eyebrow">Fix these first</p>
-                        <div className="sd-fix-list">
-                          {newestReport.improvements.slice(0, 3).map((imp, i) => (
-                            <div className="sd-fix" key={i}>
-                              <span className={`sd-prio ${imp.priority}`}>{imp.priority === "high" ? "High" : imp.priority === "medium" ? "Med" : imp.priority}</span>
-                              <span>{imp.area}</span>
-                            </div>
-                          ))}
-                        </div>
-                        <button type="button" className="sd-btn-soft" onClick={() => setView("practice")}>Practice what you missed</button>
-                      </div>
+                      <button type="button" className="sd-btn-soft sd-fix-trigger" onClick={() => setFixOpen(true)}>
+                        <ListChecks size={16} /> Fix these first
+                        <span className="sd-fix-count">{newestReport.improvements.length}</span>
+                      </button>
                     ) : null}
                   </>
                 ) : (
@@ -1518,29 +1797,40 @@ function StudentDashboard({ student, token, onLogout, route = [], navigate = () 
                   </div>
                 )}
 
-                <div className="sd-card">
-                  <div className="sd-card-head">
-                    <p className="sd-card-eyebrow">Interview ready</p>
-                    <span className="sd-card-count">{shortlisted.length}</span>
-                  </div>
-                  {shortlisted.length ? (
-                    <div className="sd-ready-list">
-                      {shortlisted.slice(0, 5).map((app) => (
-                        <div className="sd-ready" key={app.id}>
-                          <span className="sd-ready-info">
-                            <strong>{app.company?.name || "Company"}</strong>
-                            <span>{app.opportunity?.role || "Role"}</span>
-                          </span>
-                          <span className="sd-ready-date">{app.applied_at ? formatDate(app.applied_at) : ""}</span>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="sd-empty-note">Shortlists will appear here.</p>
-                  )}
-                </div>
               </aside>
             </div>
+
+            {detailApp ? (
+              <SdAppDetailModal
+                app={detailApp}
+                report={reportByApplication[detailApp.id]}
+                onOpenReport={openReport}
+                onClose={() => setDetailApp(null)}
+              />
+            ) : null}
+
+            {fixOpen && newestReport?.improvements?.length ? (
+              <SdModal title="Fix these first" onClose={() => setFixOpen(false)}>
+                <div className="sd-fix-list">
+                  {newestReport.improvements.map((imp, i) => (
+                    <div className="sd-fix" key={i}>
+                      <span className={`sd-prio ${imp.priority}`}>{imp.priority === "high" ? "High" : imp.priority === "medium" ? "Med" : imp.priority}</span>
+                      <span>{imp.area}</span>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  className="sd-btn-soft"
+                  onClick={() => {
+                    setFixOpen(false);
+                    setView("practice");
+                  }}
+                >
+                  Practice what you missed
+                </button>
+              </SdModal>
+            ) : null}
           </>
         )}
       </section>
@@ -4432,7 +4722,7 @@ function CompanyDetailView({ adminToken, companyId, onBack, selectedOppId, onSel
             <Metric
               icon={<BadgeCheck size={20} />}
               label="Shortlisted"
-              value={selectedOppId ? (oppData?.opportunity?.shortlists_count ?? 0) : (stats.shortlisted_count ?? 0)}
+              value={selectedOppId ? (oppData?.stats?.shortlisted_count ?? 0) : (stats.shortlisted_count ?? 0)}
             />
             <Metric icon={<BarChart3 size={20} />} label="Responses" value={stats.response_count ?? 0} />
           </section>
@@ -4583,6 +4873,18 @@ const sheetApi = {
       method: "POST",
       adminToken,
       body: { url },
+    }),
+  fullSync: (adminToken, url) =>
+    apiRequest("/admin/sync/full", {
+      method: "POST",
+      adminToken,
+      body: { url },
+    }),
+  pasteSync: (adminToken, rawText, url) =>
+    apiRequest("/admin/sync/paste", {
+      method: "POST",
+      adminToken,
+      body: { raw_text: rawText, url: url || null },
     }),
   deleteOpportunity: (adminToken, opportunityId, reason) =>
     apiRequest(`/admin/opportunities/${opportunityId}`, {
@@ -4947,6 +5249,14 @@ function QuestionsPanel({ questions }) {
 /* --- Add companies: paste rows from the master tracker ------------- */
 const MASTER_URL_KEY = "rsa_master_sheet_url";
 
+// One cell of a master-row change, as the preview shows it. An empty cell reads
+// as "(empty)" so "filled in" and "changed" look different at a glance.
+function formatCellValue(value) {
+  if (value === null || value === undefined || value === "") return "(empty)";
+  const text = String(value);
+  return text.length > 60 ? `${text.slice(0, 60)}…` : text;
+}
+
 function AddCompaniesPanel({ adminToken, onImported }) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
@@ -4958,15 +5268,48 @@ function AddCompaniesPanel({ adminToken, onImported }) {
   const [error, setError] = useState("");
   const [syncMode, setSyncMode] = useState("full");
   const [confirmMode, setConfirmMode] = useState(null);
+  const [syncing, setSyncing] = useState(false);
+  const [warning, setWarning] = useState("");
 
   function reset() {
     setPreview(null);
     setApplied(null);
     setError("");
+    setWarning("");
   }
 
-  // Import from pasted text.
+  // Every sync - Pull only new, Fetch entire sheet, pasted rows - runs the same
+  // pipeline: Master rows first, then each opening's responses and shortlist.
+  // An error here means the Master stage failed and nothing was synced.
+  async function runSync(request, onDone) {
+    setBusy(true);
+    setSyncing(true);
+    setError("");
+    setWarning("");
+    try {
+      const result = await request();
+      setApplied({ result });
+      setPreview(null);
+      onDone?.();
+      if (result.status === "PARTIAL") {
+        setWarning(result.message || "Some openings could not be synced - see the sync results below.");
+      }
+      await onImported?.(result);
+    } catch (err) {
+      setError(err.message || "Sync failed.");
+    } finally {
+      setBusy(false);
+      setSyncing(false);
+    }
+  }
+
+  // Pasted Master rows. The header row is optional: copied rows get the header
+  // of the Master sheet link above. Confirming runs the full pipeline.
   async function run(confirm) {
+    if (confirm) {
+      await runSync(() => sheetApi.pasteSync(adminToken, text, url.trim()), () => setText(""));
+      return;
+    }
     setBusy(true);
     setError("");
     setFromUrl(false);
@@ -4974,7 +5317,7 @@ function AddCompaniesPanel({ adminToken, onImported }) {
       const result = await apiRequest("/admin/companies/import", {
         method: "POST",
         adminToken,
-        body: { raw_text: text, confirm },
+        body: { raw_text: text, confirm: false, url: url.trim() || null },
       });
       if (confirm) {
         setApplied(result);
@@ -4992,8 +5335,13 @@ function AddCompaniesPanel({ adminToken, onImported }) {
     }
   }
 
-  // Import by fetching the master sheet URL.
+  // Preview the whole Master sheet; confirming runs the full pipeline.
   async function runUrl(confirm) {
+    localStorage.setItem(MASTER_URL_KEY, url.trim());
+    if (confirm) {
+      await runSync(() => sheetApi.fullSync(adminToken, url.trim()));
+      return;
+    }
     setBusy(true);
     setError("");
     setFromUrl(true);
@@ -5050,7 +5398,13 @@ function AddCompaniesPanel({ adminToken, onImported }) {
   }
 
   const counts = preview?.counts || {};
-  const incrementalResults = applied?.incremental ? (applied.result?.opportunity_results || []) : [];
+  const incrementalResults = applied?.result?.opportunity_results || [];
+  // Openings where something was imported or went wrong. The rest (already
+  // imported, no link, empty sheet) are only counted, so a full sync stays readable.
+  const activeResults = incrementalResults.filter(
+    (item) => item.response?.status !== "SKIPPED" || item.shortlist?.status !== "SKIPPED",
+  );
+  const quietCount = incrementalResults.length - activeResults.length;
   const responseSynced = incrementalResults.filter((item) => item.response?.status === "SUCCESS").length;
   const responseSkipped = incrementalResults.filter((item) => item.response?.status === "SKIPPED").length;
   const responseFailed = incrementalResults.filter((item) => item.response?.status === "FAILED").length;
@@ -5075,7 +5429,9 @@ function AddCompaniesPanel({ adminToken, onImported }) {
         <>
           <p className="rsa-hint">
             Pull the company master tracker from its Google Sheets link, or paste rows below. Each
-            row creates a company and its opening, or updates them if they already exist.
+            row creates a company and its opening, or updates them if they already exist — and an
+            opening you deleted comes back if the sheet still lists it. Responses and shortlists are
+            loaded for every opening in the same run; nothing needs Force by hand.
           </p>
 
           {!preview && !applied ? (
@@ -5106,12 +5462,12 @@ function AddCompaniesPanel({ adminToken, onImported }) {
             </div>
           </div>
 
-          {busy && syncMode === "incremental" ? (
+          {syncing ? (
             <div className="sync-progress" aria-live="polite">
               <strong>Sync Progress</strong>
               <span>● Master Sheet processing</span>
-              <span>● Processing newly discovered opportunities</span>
-              <span>● Response and Shortlist imports run in dependency order</span>
+              <span>● Loading responses for new and changed openings</span>
+              <span>● Shortlists load after their responses</span>
             </div>
           ) : null}
 
@@ -5136,26 +5492,37 @@ function AddCompaniesPanel({ adminToken, onImported }) {
 
           {error ? <StatusMessage error={error} /> : null}
 
+          {warning ? (
+            <div className="rsa-warning" style={{ marginBottom: 12 }}>
+              <TriangleAlert size={16} />
+              <span>{warning}</span>
+            </div>
+          ) : null}
+
           {applied ? (
             <div className="status success" style={{ marginBottom: 12 }}>
               <BadgeCheck size={18} />
               <span>
-                {applied.incremental
-                  ? `Incremental sync completed. Opportunities added: ${applied.result?.master?.created ?? 0}. Opportunities updated: ${applied.result?.master?.updated ?? 0}. Response synced: ${responseSynced}, skipped: ${responseSkipped}, failed: ${responseFailed}. Shortlist synced: ${shortlistSynced}, skipped: ${shortlistSkipped}, failed: ${shortlistFailed}.`
-                  : `Done — ${applied.counts.companies_new} new compan
-                {applied.counts.companies_new === 1 ? "y" : "ies"},{" "}
-                {applied.counts.opportunities_to_create} opening(s) created,{" "}
-                {applied.counts.opportunities_to_update} updated.`}
+                {`Sync completed. Opportunities added: ${applied.result?.master?.created ?? 0}. Restored: ${applied.result?.master?.restored ?? 0}. Updated: ${applied.result?.master?.updated ?? 0}. Unchanged: ${applied.result?.master?.unchanged ?? 0}. Response synced: ${responseSynced}, skipped: ${responseSkipped}, failed: ${responseFailed}. Shortlist synced: ${shortlistSynced}, skipped: ${shortlistSkipped}, failed: ${shortlistFailed}.`}
               </span>
             </div>
           ) : null}
 
-          {applied?.incremental && applied?.result?.opportunity_results?.length ? (
+          {activeResults.length ? (
             <div className="sync-results">
               <h3>Sync Results</h3>
-              {applied.result.opportunity_results.map((item) => (
+              {quietCount ? (
+                <p className="muted">{quietCount} other opening(s) had nothing new to import.</p>
+              ) : null}
+              {activeResults.map((item) => (
                 <div className={`sync-result ${item.response?.status === "FAILED" || item.shortlist?.status === "FAILED" ? "attention" : ""}`} key={item.opportunity_id}>
-                  <strong>{item.is_new ? "New opportunity" : "Existing opportunity"}: {item.opportunity_id}</strong>
+                  <strong>
+                    {item.is_new ? "New opening" : item.restored ? "Restored opening" : "Existing opening"}:{" "}
+                    {item.company ? `${item.company}${item.role ? ` · ${item.role}` : ""}` : item.opportunity_id}
+                  </strong>
+                  {item.restored ? (
+                    <span className="success-text">✓ Deleted earlier — restored, because the Master sheet still lists it</span>
+                  ) : null}
                   <span className={item.response?.status === "SUCCESS" ? "success-text" : "attention-text"}>
                     {item.response?.status === "SUCCESS" ? "✓ Response imported" : item.response?.status === "SKIPPED" ? `⚠ ${item.response.reason}` : `✗ Response import failed: ${item.response?.error || "unknown error"}`}
                   </span>
@@ -5191,6 +5558,10 @@ function AddCompaniesPanel({ adminToken, onImported }) {
                 <div><span>New companies</span><strong>{counts.companies_new ?? 0}</strong></div>
                 <div><span>Openings to create</span><strong>{counts.opportunities_to_create ?? 0}</strong></div>
                 <div><span>Openings to update</span><strong>{counts.opportunities_to_update ?? 0}</strong></div>
+                {counts.opportunities_to_restore ? (
+                  <div><span>To restore</span><strong>{counts.opportunities_to_restore}</strong></div>
+                ) : null}
+                <div><span>Unchanged</span><strong>{counts.opportunities_unchanged ?? 0}</strong></div>
                 {counts.skipped ? <div><span>Skipped</span><strong>{counts.skipped}</strong></div> : null}
               </div>
 
@@ -5202,7 +5573,7 @@ function AddCompaniesPanel({ adminToken, onImported }) {
                   <div className="rsa-warning rsa-changed" style={{ marginBottom: 12 }}>
                     <RefreshCw size={16} />
                     <div>
-                      <strong>Sheet links changed — after confirming, open these and Sync from sheets:</strong>
+                      <strong>Sheet links changed — confirming re-pulls these sheets automatically:</strong>
                       <ul>
                         {changed.map((r) => (
                           <li key={r.row}>
@@ -5235,21 +5606,49 @@ function AddCompaniesPanel({ adminToken, onImported }) {
                 ) : null;
               })()}
 
-              <div className="rsa-preview-table">
-                {(preview.rows || []).map((row) => (
-                  <div className="rsa-preview-row" key={row.row}>
-                    <span className="muted">{row.row}</span>
-                    <div>
-                      <strong>{row.company || "(no company)"}</strong>
-                      <span>{row.role}{row.received_on ? ` · ${row.received_on}` : ""}</span>
+              {(() => {
+                // What this sync will actually change. Rows that match the
+                // database exactly are counted above but not listed here.
+                const touched = (preview.rows || []).filter((r) => r.action !== "unchanged");
+                const unchangedCount = (preview.rows || []).length - touched.length;
+                return (
+                  <>
+                    {unchangedCount ? (
+                      <p className="muted" style={{ marginBottom: 8 }}>
+                        {unchangedCount} row(s) match the database exactly and are not listed — their
+                        responses and shortlists are still synced.
+                      </p>
+                    ) : null}
+                    <div className="rsa-preview-table">
+                      {touched.map((row) => (
+                        <div className="rsa-preview-row" key={row.row}>
+                          <span className="muted">{row.row}</span>
+                          <div>
+                            <strong>{row.company || "(no company)"}</strong>
+                            <span>{row.role}{row.received_on ? ` · ${row.received_on}` : ""}</span>
+                            {row.changes?.length ? (
+                              <ul className="rsa-change-list">
+                                {row.changes.map((change) => (
+                                  <li key={change.field}>
+                                    {change.field.replaceAll("_", " ")}:{" "}
+                                    <span className="rsa-change-old">{formatCellValue(change.old)}</span>
+                                    {" → "}
+                                    <span className="rsa-change-new">{formatCellValue(change.new)}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : null}
+                          </div>
+                          <span className={`status-pill ${row.action === "skip" ? "bad" : row.action.includes("create") ? "neutral" : "good"}`}>
+                            {row.action.replaceAll("_", " ").replace("opportunity", "opening")}
+                          </span>
+                          <span className="muted">{row.company_new ? "new company" : row.reason || ""}</span>
+                        </div>
+                      ))}
                     </div>
-                    <span className={`status-pill ${row.action === "skip" ? "bad" : row.action.includes("create") ? "neutral" : "good"}`}>
-                      {row.action.replaceAll("_", " ").replace("opportunity", "opening")}
-                    </span>
-                    <span className="muted">{row.company_new ? "new company" : row.reason || ""}</span>
-                  </div>
-                ))}
-              </div>
+                  </>
+                );
+              })()}
 
               <div className="rsa-actions">
                 <button className="back-button" type="button" onClick={reset} disabled={busy}>
@@ -6469,7 +6868,7 @@ function OpportunityDetail({ detail, adminToken, opportunityId, onRefresh }) {
     ["Eligible (as per pref)", o.eligible_as_per_pref],
     ["Filled form", o.filled_form_count],
     ["Interested", o.interested_count],
-    ["Shortlists (CRM)", o.shortlists_count],
+    ["Shortlists (CRM)", o.master_shortlists_count ?? o.shortlists_count],
     ["Date of sharing profiles", o.date_of_sharing_profiles],
   ];
 
