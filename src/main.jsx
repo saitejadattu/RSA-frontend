@@ -808,14 +808,14 @@ function PracticeBank({ token }) {
     if (company) params.set("company", company);
     if (difficulty) params.set("difficulty", difficulty);
     if (search.trim()) params.set("search", search.trim());
-    apiRequest(`/students/me/practice-questions?${params.toString()}`, { token })
+    api.get(`/practice-questions?${params.toString()}`)
       .then((result) => live && setData(result))
       .catch((err) => live && setError(err.message))
       .finally(() => live && setLoading(false));
     return () => {
       live = false;
     };
-  }, [token, includeScenario, category, company, difficulty, search]);
+  }, [api, includeScenario, category, company, difficulty, search]);
 
   const questions = data?.questions || [];
   const groups = (data?.groups || []).filter((group) => (group.questions || []).length);
@@ -921,7 +921,7 @@ function StudentReportsView({ reports, loading, focusId, onPractice = () => {} }
   );
 }
 
-function StudentPracticeView({ token }) {
+function StudentPracticeView({ api }) {
   return (
     <div className="sd-practice">
       <div className="sd-view-head">
@@ -1301,7 +1301,7 @@ function SdAccordionSection({ group, items, open, onToggle, renderItem }) {
   );
 }
 
-function StudentIssuesView({ token }) {
+function StudentIssuesView({ api }) {
   const [issues, setIssues] = useState([]);
   const [selectedIssue, setSelectedIssue] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -1313,28 +1313,30 @@ function StudentIssuesView({ token }) {
     let current = true;
     setLoading(true);
     setError("");
-    apiRequest("/students/me/issues", { token })
+    api.get("/issues")
       .then((data) => current && setIssues(data || []))
       .catch((err) => current && setError(err.message))
       .finally(() => current && setLoading(false));
     return () => { current = false; };
-  }, [token]);
+  }, [api]);
 
   async function openIssue(issue) {
     setError("");
     try {
-      setSelectedIssue(await apiRequest(`/students/me/issues/${issue.id}`, { token }));
+      // An admin preview lists the issues but has no per-issue route: the row
+      // already carries what the detail shows.
+      setSelectedIssue(api.preview ? issue : await api.get(`/issues/${issue.id}`));
     } catch (err) {
       setError(err.message);
     }
   }
 
   async function reopenIssue() {
-    if (!selectedIssue) return;
+    if (!selectedIssue || api.preview) return;
     setReopenBusy(true);
     setError("");
     try {
-      const updated = await apiRequest(`/students/me/issues/${selectedIssue.id}/reopen`, { method: "POST", token });
+      const updated = await api.post(`/issues/${selectedIssue.id}/reopen`);
       setSelectedIssue(updated);
       setIssues((items) => items.map((issue) => issue.id === updated.id ? { ...issue, ...updated } : issue));
       setReopenOpen(false);
@@ -1363,7 +1365,13 @@ function StudentIssuesView({ token }) {
           <p style={{ whiteSpace: "pre-wrap", lineHeight: 1.6, marginTop: 16 }}>{selectedIssue.description}</p>
           <p className="sd-app-meta">Last updated: {selectedIssue.updated_at ? formatDate(selectedIssue.updated_at) : "Not available"}</p>
           {selectedIssue.status === "CLOSED" ? (
-            <button type="button" className="sd-btn-primary" onClick={() => setReopenOpen(true)}>
+            <button
+              type="button"
+              className="sd-btn-primary"
+              disabled={api.preview}
+              title={api.preview ? "Read-only preview — an admin can't reopen an issue as this student" : undefined}
+              onClick={() => setReopenOpen(true)}
+            >
               <RefreshCw size={16} /> <span>Reopen Issue</span>
             </button>
           ) : null}
@@ -1397,7 +1405,81 @@ function StudentIssuesView({ token }) {
   );
 }
 
-function StudentDashboard({ student, token, onLogout, route = [], navigate = () => {} }) {
+/* An admin looking at one student sees the student's own dashboard - the same
+ * components, the same payloads, the same full-window dimensions - instead of a
+ * second rendering of the same data that drifts from what the student reports.
+ * Read-only: the actions that would write as the student are disabled. */
+function AdminStudentPreview({ adminToken, studentId, onExit }) {
+  const [student, setStudent] = useState(null);
+  const [error, setError] = useState("");
+  // The student's own tab navigation, kept in memory: the admin URL stays put.
+  const [section, setSection] = useState("");
+  const source = useMemo(() => studentSource({ adminToken, studentId }), [adminToken, studentId]);
+
+  useEffect(() => {
+    let live = true;
+    setError("");
+    setStudent(null);
+    source.get("/profile")
+      .then((data) => live && setStudent(data))
+      .catch((err) => live && setError(err.message));
+    return () => { live = false; };
+  }, [source]);
+
+  if (error || !student) {
+    return (
+      <main className="dashboard-shell sd-shell">
+        <section className="dashboard-main">
+          <header className="topbar">
+            <button type="button" className="back-button" onClick={onExit}>
+              <ArrowLeft size={17} /> Back to admin
+            </button>
+          </header>
+          {error ? <StatusMessage error={error} /> : <PanelLoader />}
+        </section>
+      </main>
+    );
+  }
+
+  return (
+    <StudentDashboard
+      student={student}
+      source={source}
+      onExitPreview={onExit}
+      route={["student", section]}
+      navigate={(next) => setSection(next[1] || "")}
+    />
+  );
+}
+
+/* Where the student screens read their data from.
+ *
+ * A student reads their own: /students/me/<path> with their token. An admin
+ * previewing a student reads the very same payloads through read-only admin
+ * routes, so the admin sees the student's screen rather than a second rendering
+ * of the same data that can drift from it. */
+function studentSource({ token, adminToken, studentId }) {
+  if (studentId) {
+    return {
+      preview: true,
+      get: (path) => apiRequest(`/admin/students/${studentId}/view${path}`, { adminToken }),
+    };
+  }
+  return {
+    preview: false,
+    get: (path) => apiRequest(`/students/me${path}`, { token }),
+    post: (path, body) => apiRequest(`/students/me${path}`, { method: "POST", token, body }),
+  };
+}
+
+function StudentDashboard({
+  student, token, onLogout, route = [], navigate = () => {},
+  // Admin preview passes a source reading the same payloads read-only, and
+  // renders the shell full width so the dimensions match the student's.
+  source, onExitPreview,
+}) {
+  const api = useMemo(() => source || studentSource({ token }), [source, token]);
+  const preview = Boolean(api.preview);
   const [dashboard, setDashboard] = useState(null);
   const [dashboardError, setDashboardError] = useState("");
   const [loadingDashboard, setLoadingDashboard] = useState(true);
@@ -1435,7 +1517,7 @@ function StudentDashboard({ student, token, onLogout, route = [], navigate = () 
     let isCurrent = true;
     setLoadingDashboard(true);
     setDashboardError("");
-    apiRequest("/students/me/dashboard", { token })
+    api.get("/dashboard")
       .then((data) => {
         if (isCurrent) setDashboard(data);
       })
@@ -1449,13 +1531,13 @@ function StudentDashboard({ student, token, onLogout, route = [], navigate = () 
     return () => {
       isCurrent = false;
     };
-  }, [token]);
+  }, [api]);
 
   // Published reports drive both the Feedback column and the reports view.
   useEffect(() => {
     let isCurrent = true;
     setLoadingReports(true);
-    apiRequest("/students/me/reports", { token })
+    api.get("/reports")
       .then((data) => {
         if (isCurrent) setReports(data || []);
       })
@@ -1468,7 +1550,7 @@ function StudentDashboard({ student, token, onLogout, route = [], navigate = () 
     return () => {
       isCurrent = false;
     };
-  }, [token]);
+  }, [api]);
 
   const reportByApplication = useMemo(() => {
     const map = {};
@@ -1547,14 +1629,10 @@ function StudentDashboard({ student, token, onLogout, route = [], navigate = () 
     setIssueBusy(true);
     setIssueError("");
     try {
-      await apiRequest("/students/me/issues", {
-        method: "POST",
-        token,
-        body: {
-          title: issueTitle.trim(),
-          category: issueCategory,
-          description: issueDescription.trim(),
-        },
+      await api.post("/issues", {
+        title: issueTitle.trim(),
+        category: issueCategory,
+        description: issueDescription.trim(),
       });
       closeIssue();
       setIssueSuccess("Issue submitted successfully. Thank you for helping us improve the application.");
@@ -1598,8 +1676,10 @@ function StudentDashboard({ student, token, onLogout, route = [], navigate = () 
           {shortlisted.length ? (
             <p className="sd-nudge">You're on {shortlisted.length} shortlist{shortlisted.length === 1 ? "" : "s"}. Keep the momentum going.</p>
           ) : null}
-          <button className="ghost-button" onClick={onLogout}>
-            <LogOut size={18} /> Log out
+          {/* Same button, same place: an admin previewing leaves instead of
+              logging the student out. */}
+          <button className="ghost-button" onClick={preview ? onExitPreview : onLogout}>
+            <LogOut size={18} /> {preview ? "Back to admin" : "Log out"}
           </button>
         </div>
       </aside>
@@ -1610,7 +1690,13 @@ function StudentDashboard({ student, token, onLogout, route = [], navigate = () 
             <h1>{greeting()}, {firstName} 👋</h1>
             {/* <p className="sd-header-sub">{headerSub}</p> */}
           </div>
-          <button type="button" className="primary-button" onClick={() => { setIssueOpen(true); setIssueSuccess(""); setIssueError(""); }}>
+          <button
+            type="button"
+            className="primary-button"
+            disabled={preview}
+            title={preview ? "Read-only preview — an admin can't raise an issue as this student" : undefined}
+            onClick={() => { setIssueOpen(true); setIssueSuccess(""); setIssueError(""); }}
+          >
             <CircleHelp size={17} /> Report an Issue
           </button>
           <div className="sd-profile-wrap">
@@ -1685,12 +1771,12 @@ function StudentDashboard({ student, token, onLogout, route = [], navigate = () 
         ) : null}
 
         {view === "issues" ? (
-          <StudentIssuesView token={token} />
+          <StudentIssuesView api={api} />
         ) : view === "reports" ? (
           <StudentReportsView reports={reports} loading={loadingReports} focusId={focusReportId} onPractice={() => setView("practice")} />
         ) : view === "practice" ? (
-          <StudentPracticeView token={token} />
-        ) : dashboardError ? (
+          <StudentPracticeView api={api} />
+        ) :dashboardError ? (
           <StatusMessage error={dashboardError} />
         ) : loadingDashboard ? (
           <PanelLoader />
@@ -1970,6 +2056,9 @@ function AdminDashboard({ adminToken, onLogout, route = [], navigate = () => {} 
   const activeView = KNOWN_VIEWS.includes(route[1]) ? route[1] : "overview";
   const companyId = route[1] === "company" ? route[2] || null : null;
   const studentId = route[1] === "student" ? route[2] || null : null;
+  // Opening a student shows their own dashboard; /details is the admin's own
+  // view of them, with placement and status controls.
+  const studentAdminDetails = route[1] === "student" && route[3] === "details";
   const routeOppId = route[3] === "opp" ? route[4] || null : null;
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -2084,6 +2173,19 @@ function AdminDashboard({ adminToken, onLogout, route = [], navigate = () => {} 
   });
 
   const overviewViews = ["overview", "queue", "companies", "reports"];
+
+  // Rendered instead of the admin shell, not inside it: the student's dashboard
+  // then gets the whole window, exactly as the student sees it.
+  if (studentId && !studentAdminDetails) {
+    return (
+      <AdminStudentPreview
+        adminToken={adminToken}
+        studentId={studentId}
+        onExit={() => navigate(["admin", "student", studentId, "details"])}
+      />
+    );
+  }
+
   return (
     <main className="dashboard-shell sd-shell">
       <aside className="sidebar">
@@ -4486,6 +4588,9 @@ function StudentProfileView({ adminToken, studentId, navigate, onBack }) {
             <h1>{s?.name || "Student"}</h1>
           </div>
         </div>
+        <button type="button" className="primary-button" onClick={() => navigate(["admin", "student", studentId])}>
+          <UsersRound size={17} /> View as student
+        </button>
       </header>
 
       {error || updateError ? <StatusMessage error={error || updateError} /> : null}
