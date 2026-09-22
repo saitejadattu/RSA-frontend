@@ -469,7 +469,7 @@ function UnifiedLogin({ onStudent, onAdmin }) {
               <input
                 value={identifier}
                 onChange={(event) => setIdentifier(event.target.value)}
-                placeholder="Mobile number (student) or email (admin)"
+                placeholder="Mobile number"
                 autoComplete="username"
                 required
               />
@@ -5319,8 +5319,15 @@ function AddCompaniesPanel({ adminToken, onImported }) {
         adminToken,
         body: { raw_text: text, confirm: false, url: url.trim() || null },
       });
-      setPreview(result);
-      setApplied(null);
+      if (confirm) {
+        setApplied(result);
+        setPreview(null);
+        setText("");
+        await onImported?.(result);
+      } else {
+        setPreview(result);
+        setApplied(null);
+      }
     } catch (err) {
       setError(err.message);
     } finally {
@@ -5339,8 +5346,16 @@ function AddCompaniesPanel({ adminToken, onImported }) {
     setError("");
     setFromUrl(true);
     try {
-      setPreview(await sheetApi.masterFetch(adminToken, url.trim(), false));
-      setApplied(null);
+      const result = await sheetApi.masterFetch(adminToken, url.trim(), confirm);
+      localStorage.setItem(MASTER_URL_KEY, url.trim());
+      if (confirm) {
+        setApplied(result);
+        setPreview(null);
+        await onImported?.(result);
+      } else {
+        setPreview(result);
+        setApplied(null);
+      }
     } catch (err) {
       setError(err.message);
     } finally {
@@ -5348,9 +5363,23 @@ function AddCompaniesPanel({ adminToken, onImported }) {
     }
   }
 
-  function runIncremental() {
-    localStorage.setItem(MASTER_URL_KEY, url.trim());
-    return runSync(() => sheetApi.incremental(adminToken, url.trim()));
+  async function runIncremental() {
+    setBusy(true);
+    setError("");
+    try {
+      const result = await sheetApi.incremental(adminToken, url.trim());
+      setApplied({ incremental: true, result });
+      await onImported?.(result);
+    } catch (err) {
+      const resultData = err.data;
+      if (resultData?.opportunity_results) {
+        setApplied({ incremental: true, result: resultData });
+        await onImported?.(resultData);
+      }
+      setError(`Incremental sync completed with failures. ${err.message || "Please check the sync details."}`);
+    } finally {
+      setBusy(false);
+    }
   }
 
   function requestSync() {
@@ -6870,15 +6899,9 @@ function OpportunityDetail({ detail, adminToken, opportunityId, onRefresh }) {
   return (
     <>
       <section className="stats-grid admin-stats">
-        {/* Every card counts this opening's own applications, so they always add
-            up against the applicant list below. */}
-        <Metric icon={<UsersRound size={20} />} label="Applied" value={stats.applied_count ?? o.application_count ?? 0} />
-        <Metric icon={<BadgeCheck size={20} />} label="Shortlisted" value={stats.shortlisted_count ?? 0} />
-        <Metric
-          icon={<XCircle size={20} />}
-          label="Not shortlisted"
-          value={(stats.not_shortlisted_count ?? 0) + (stats.rejected_count ?? 0)}
-        />
+        <Metric icon={<UsersRound size={20} />} label="Applied" value={o.application_count ?? 0} />
+        <Metric icon={<BadgeCheck size={20} />} label="Shortlisted" value={o.shortlists_count ?? 0} />
+        <Metric icon={<XCircle size={20} />} label="Rejected" value={stats.rejected_count ?? 0} />
         <Metric icon={<BarChart3 size={20} />} label="Responses" value={stats.response_count ?? 0} />
       </section>
 

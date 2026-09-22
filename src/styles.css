@@ -396,6 +396,9 @@ input:focus {
   height: 38px;
   border-radius: 8px;
   background: #2563eb;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
 }
 
 .metric strong {
@@ -2732,6 +2735,47 @@ input:focus {
   white-space: nowrap;
 }
 
+.rsa-analysis-choice,
+.rsa-manual-analysis {
+  display: grid;
+  gap: 12px;
+}
+
+.rsa-analysis-choice-actions,
+.rsa-manual-participants,
+.rsa-manual-preview {
+  display: grid;
+  gap: 8px;
+}
+
+.rsa-manual-participants,
+.rsa-manual-preview {
+  padding: 12px 14px;
+  border: 1px solid #e5eaf0;
+  border-radius: 8px;
+  background: #f7f9fb;
+}
+
+.rsa-manual-participants span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #0f766e;
+  font-size: 13px;
+}
+
+.rsa-manual-textarea {
+  min-height: 300px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.rsa-manual-preview span {
+  font-size: 13px;
+  color: #475467;
+}
+
 @media (max-width: 900px) {
   .rsa-cols,
   .rsa-map-row,
@@ -3511,13 +3555,14 @@ input:focus {
 .ov-table { display: grid; border: 1px solid #e5eaf0; border-radius: 8px; overflow: hidden; }
 .ov-thead, .ov-trow {
   display: grid;
-  grid-template-columns: 1.15fr 1.3fr 0.6fr 0.8fr 0.7fr;
+  grid-template-columns: 1.15fr 1.2fr 0.55fr 0.75fr 0.75fr 1.35fr;
   gap: 12px;
-  align-items: center;
+  align-items: start;
   padding: 0 12px;
 }
 .ov-thead {
   min-height: 42px;
+  align-items: center;
   background: #eef2f5;
   color: #4b5563;
   font-size: 12px;
@@ -3529,18 +3574,24 @@ input:focus {
 .ov-cell > span { color: #65717e; font-size: 13px; overflow-wrap: anywhere; }
 .ov-cell strong { font-weight: 700; }
 .ov-applied { font-size: 15px; font-weight: 800; color: #1f2937; }
+
+.ov-no-student-star {
+  color: #dc2626;
+  font-weight: 700;
+  margin-left: 4px;
+}
 .ov-sl { justify-self: start; font-size: 13px; font-weight: 800; }
 .ov-sl.good { color: #0f766e; }
 .ov-sl-pct { font-weight: 700; color: #98a2b3; font-size: 12px; }
 .ov-sl.none { font-size: 12px; font-weight: 700; color: #b54708; background: #fffaeb; padding: 3px 9px; border-radius: 999px; }
 .ov-sl.zero { color: #98a2b3; }
 .ov-date { color: #65717e; font-size: 13px; white-space: nowrap; }
-.ov-date-sync { display: grid; gap: 5px; min-width: 0; }
-.ov-sync-results { display: grid; gap: 2px; max-width: 260px; }
-.ov-sync-status { font-size: 11px; line-height: 1.35; overflow-wrap: anywhere; }
-.ov-sync-status.success { color: #047857; }
-.ov-sync-status.skipped { color: #b45309; }
-.ov-sync-status.failed { color: #b42318; }
+.ov-sheet-availability { display: inline-flex; align-items: center; gap: 6px; min-width: 0; font-size: 11.5px; font-weight: 700; white-space: nowrap; }
+.ov-sheet-dot { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; background: currentColor; }
+.ov-sheet-availability.available { color: #047857; }
+.ov-sheet-availability.response-only { color: #a16207; }
+.ov-sheet-availability.shortlist-only { color: #7e22ce; }
+.ov-sheet-availability.none { color: #b42318; }
 
 /* coming-soon placeholder */
 .ov-soon { display: grid; justify-items: start; gap: 12px; color: #475467; }
@@ -5739,7 +5790,8 @@ input:focus {
     text-transform: uppercase;
     color: #0f766e;
   }
-  /* shortlisted + received are secondary — hidden on the compact card */
+  /* shortlisted, received and status are secondary — hidden on the compact card */
   .ov-trow > :nth-child(4),
-  .ov-trow > :nth-child(5) { display: none; }
+  .ov-trow > :nth-child(5),
+  .ov-trow > :nth-child(6) { display: none; }
 }
