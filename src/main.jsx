@@ -469,7 +469,7 @@ function UnifiedLogin({ onStudent, onAdmin }) {
               <input
                 value={identifier}
                 onChange={(event) => setIdentifier(event.target.value)}
-                placeholder="Mobile number (student) or email (admin)"
+                placeholder="Mobile number"
                 autoComplete="username"
                 required
               />
@@ -4712,15 +4712,16 @@ function CompanyDetailView({ adminToken, companyId, onBack, selectedOppId, onSel
         <div className="empty-state compact"><p>Company not found.</p></div>
       ) : (
         <>
-          <section className="stats-grid admin-stats">
-            <Metric icon={<BriefcaseBusiness size={20} />} label="Opportunities" value={data.opportunity_count ?? 0} />
-            <Metric icon={<UsersRound size={20} />} label="Applied" value={stats.applied_count ?? 0} />
-            <Metric
-              icon={<BadgeCheck size={20} />}
-              label="Shortlisted"
-              value={selectedOppId ? (oppData?.stats?.shortlisted_count ?? 0) : (stats.shortlisted_count ?? 0)}
-            />
-          </section>
+          {/* Company-wide totals, and only while no single opening is open: with
+              one opening they are that opening's numbers repeated, and with
+              several the opening below shows its own. */}
+          {!selectedOppId ? (
+            <section className="stats-grid admin-stats">
+              <Metric icon={<BriefcaseBusiness size={20} />} label="Opportunities" value={data.opportunity_count ?? 0} />
+              <Metric icon={<UsersRound size={20} />} label="Applied" value={stats.applied_count ?? 0} />
+              <Metric icon={<BadgeCheck size={20} />} label="Shortlisted" value={stats.shortlisted_count ?? 0} />
+            </section>
+          ) : null}
 
           {multi && !selectedOppId ? (
             <OpportunityChooser opportunities={opportunities} onSelect={onSelectOpp} />
@@ -5314,8 +5315,15 @@ function AddCompaniesPanel({ adminToken, onImported }) {
         adminToken,
         body: { raw_text: text, confirm: false, url: url.trim() || null },
       });
-      setPreview(result);
-      setApplied(null);
+      if (confirm) {
+        setApplied(result);
+        setPreview(null);
+        setText("");
+        await onImported?.(result);
+      } else {
+        setPreview(result);
+        setApplied(null);
+      }
     } catch (err) {
       setError(err.message);
     } finally {
@@ -5334,8 +5342,16 @@ function AddCompaniesPanel({ adminToken, onImported }) {
     setError("");
     setFromUrl(true);
     try {
-      setPreview(await sheetApi.masterFetch(adminToken, url.trim(), false));
-      setApplied(null);
+      const result = await sheetApi.masterFetch(adminToken, url.trim(), confirm);
+      localStorage.setItem(MASTER_URL_KEY, url.trim());
+      if (confirm) {
+        setApplied(result);
+        setPreview(null);
+        await onImported?.(result);
+      } else {
+        setPreview(result);
+        setApplied(null);
+      }
     } catch (err) {
       setError(err.message);
     } finally {
@@ -5343,9 +5359,23 @@ function AddCompaniesPanel({ adminToken, onImported }) {
     }
   }
 
-  function runIncremental() {
-    localStorage.setItem(MASTER_URL_KEY, url.trim());
-    return runSync(() => sheetApi.incremental(adminToken, url.trim()));
+  async function runIncremental() {
+    setBusy(true);
+    setError("");
+    try {
+      const result = await sheetApi.incremental(adminToken, url.trim());
+      setApplied({ incremental: true, result });
+      await onImported?.(result);
+    } catch (err) {
+      const resultData = err.data;
+      if (resultData?.opportunity_results) {
+        setApplied({ incremental: true, result: resultData });
+        await onImported?.(resultData);
+      }
+      setError(`Incremental sync completed with failures. ${err.message || "Please check the sync details."}`);
+    } finally {
+      setBusy(false);
+    }
   }
 
   function requestSync() {
