@@ -372,8 +372,10 @@ input:focus {
   margin-bottom: 18px;
 }
 
+/* Fits whatever cards a screen shows (three or four) instead of leaving a hole
+   in a fixed four-column row. */
 .stats-grid.admin-stats {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
 }
 
 .metric,

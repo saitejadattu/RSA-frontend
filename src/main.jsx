@@ -2079,10 +2079,6 @@ function AdminDashboard({ adminToken, onLogout, route = [], navigate = () => {} 
       return (a.shortlists_count ?? 0) - (b.shortlists_count ?? 0);
     } else if (sortBy === "shortlisted_desc") {
       return (b.shortlists_count ?? 0) - (a.shortlists_count ?? 0);
-    } else if (sortBy === "response_asc") {
-      return (a.response_count ?? 0) - (b.response_count ?? 0);
-    } else if (sortBy === "response_desc") {
-      return (b.response_count ?? 0) - (a.response_count ?? 0);
     }
     return 0;
   });
@@ -3527,7 +3523,7 @@ function AdminOverview({
           <p className="eyebrow">Admin dashboard</p>
           <h1>Placement pipeline</h1>
           <p className="ov-sub">
-            {placement.rate ?? 0}% placed · {placement.placed ?? 0} of {placement.total_students ?? 0} students · {fmt(summary.response_count)} applications across {fmt(summary.total_opportunities)} openings
+            {placement.rate ?? 0}% placed · {placement.placed ?? 0} of {placement.total_students ?? 0} students · {fmt(summary.total_applications)} applications across {fmt(summary.total_opportunities)} openings
           </p>
         </div>
         <button className="icon-button" type="button" onClick={onRefresh} disabled={loading} title="Refresh">
@@ -4526,7 +4522,7 @@ function StudentProfileView({ adminToken, studentId, navigate, onBack }) {
           </section>
 
           <section className="kpi-grid">
-            <KpiTile label="Applied" value={fmt(stats.interested)} sub={`${fmt(stats.responses)} responses`} />
+            <KpiTile label="Applied" value={fmt(stats.interested)} />
             <KpiTile label="Shortlisted" value={fmt(stats.shortlisted)} />
             <KpiTile label="Selected" value={fmt(stats.selected)} />
             <KpiTile label="Declined" value={fmt(stats.declined)} sub="not interested" />
@@ -4724,7 +4720,6 @@ function CompanyDetailView({ adminToken, companyId, onBack, selectedOppId, onSel
               label="Shortlisted"
               value={selectedOppId ? (oppData?.stats?.shortlisted_count ?? 0) : (stats.shortlisted_count ?? 0)}
             />
-            <Metric icon={<BarChart3 size={20} />} label="Responses" value={stats.response_count ?? 0} />
           </section>
 
           {multi && !selectedOppId ? (
@@ -6871,7 +6866,9 @@ function OpportunityDetail({ detail, adminToken, opportunityId, onRefresh }) {
     <>
       <section className="stats-grid admin-stats">
         {/* Every card counts this opening's own applications, so they always add
-            up against the applicant list below. */}
+            up against the applicant list below. Applied is the only intake
+            number shown: "Responses" counted the same rows, minus nobody except
+            the students who said they were not interested. */}
         <Metric icon={<UsersRound size={20} />} label="Applied" value={stats.applied_count ?? o.application_count ?? 0} />
         <Metric icon={<BadgeCheck size={20} />} label="Shortlisted" value={stats.shortlisted_count ?? 0} />
         <Metric
@@ -6879,7 +6876,6 @@ function OpportunityDetail({ detail, adminToken, opportunityId, onRefresh }) {
           label="Not shortlisted"
           value={(stats.not_shortlisted_count ?? 0) + (stats.rejected_count ?? 0)}
         />
-        <Metric icon={<BarChart3 size={20} />} label="Responses" value={stats.response_count ?? 0} />
       </section>
 
       <section className="content-grid admin-grid">
