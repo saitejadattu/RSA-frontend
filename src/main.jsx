@@ -1361,6 +1361,28 @@ function StudentIssuesView({ token }) {
           <p className="sd-app-meta">{selectedIssue.category} · Created {formatDate(selectedIssue.created_at)}</p>
           <span className={`sd-pill ${selectedIssue.status === "CLOSED" ? "good" : "warn"}`}>{selectedIssue.status === "CLOSED" ? "CLOSED" : "IN PROGRESS"}</span>
           <p style={{ whiteSpace: "pre-wrap", lineHeight: 1.6, marginTop: 16 }}>{selectedIssue.description}</p>
+
+          {/* What the team answered - the reason the issue was closed. */}
+          {(selectedIssue.replies || []).length
+            ? selectedIssue.replies.map((reply, index) => (
+                <div className="sd-issue-reply" key={`${reply.responded_at || index}`}>
+                  <p>{reply.message}</p>
+                  <span className="sd-app-meta">
+                    {reply.responded_by || "RSA team"}
+                    {reply.responded_at ? ` · ${formatDate(reply.responded_at)}` : ""}
+                  </span>
+                </div>
+              ))
+            : selectedIssue.resolution ? (
+                <div className="sd-issue-reply">
+                  <p>{selectedIssue.resolution.message}</p>
+                  <span className="sd-app-meta">
+                    {selectedIssue.resolution.responded_by || "RSA team"}
+                    {selectedIssue.resolution.responded_at ? ` · ${formatDate(selectedIssue.resolution.responded_at)}` : ""}
+                  </span>
+                </div>
+              ) : null}
+
           <p className="sd-app-meta">Last updated: {selectedIssue.updated_at ? formatDate(selectedIssue.updated_at) : "Not available"}</p>
           {selectedIssue.status === "CLOSED" ? (
             <button type="button" className="sd-btn-primary" onClick={() => setReopenOpen(true)}>
@@ -2208,6 +2230,8 @@ function AdminIssuesView({ data, loading, adminToken, navigate = () => {}, filte
   const [detailLoading, setDetailLoading] = useState(false);
   const [statusBusy, setStatusBusy] = useState(false);
   const [pendingStatus, setPendingStatus] = useState(null);
+  // A ticket cannot be closed without telling the student what happened.
+  const [responseText, setResponseText] = useState("");
   const [error, setError] = useState("");
   const [issueItems, setIssueItems] = useState([]);
   const [summary, setSummary] = useState({});
@@ -2229,6 +2253,7 @@ function AdminIssuesView({ data, loading, adminToken, navigate = () => {}, filte
   async function openIssue(issue) {
     setDetailLoading(true);
     setError("");
+    setResponseText("");
     try {
       setSelectedIssue(await apiRequest(`/admin/issues/${issue.id}`, { adminToken }));
     } catch (err) {
@@ -2246,8 +2271,9 @@ function AdminIssuesView({ data, loading, adminToken, navigate = () => {}, filte
       setSelectedIssue(await apiRequest(`/admin/issues/${selectedIssue.id}/status`, {
         method: "PATCH",
         adminToken,
-        body: { status: pendingStatus },
+        body: { status: pendingStatus, response: responseText.trim() || null },
       }));
+      setResponseText("");
       setIssueItems((items) => items.map((issue) => issue.id === selectedIssue.id ? { ...issue, status: pendingStatus } : issue));
       setSummary((current) => ({
         ...current,
@@ -2303,45 +2329,94 @@ function AdminIssuesView({ data, loading, adminToken, navigate = () => {}, filte
       </div>
       {error ? <StatusMessage error={error} /> : null}
       {selectedIssue ? (
-        <div className="rsa-warning" style={{ marginBottom: 16, display: "block" }}>
-          <button type="button" className="back-button" onClick={() => setSelectedIssue(null)} disabled={detailLoading}>
-            <ArrowLeft size={16} /> Back to issues
-          </button>
-          <h3 style={{ margin: "14px 0 8px" }}>{selectedIssue.title}</h3>
-          <dl style={{ display: "grid", gap: 8, margin: "14px 0" }}>
-            <div><dt className="muted">Student</dt><dd style={{ margin: 0 }}>
+        <article className="ticket">
+          <div className="ticket-top">
+            <button type="button" className="back-button" onClick={() => setSelectedIssue(null)} disabled={detailLoading}>
+              <ArrowLeft size={16} /> Back to issues
+            </button>
+            <span className={`status-pill ${selectedIssue.status === "IN_PROGRESS" ? "warn" : "good"}`}>
+              {selectedIssue.status === "IN_PROGRESS" ? "IN PROGRESS" : "CLOSED"}
+            </span>
+          </div>
+
+          <h3 className="ticket-title">{selectedIssue.title}</h3>
+
+          <div className="ticket-meta">
+            <div>
+              <span>Student</span>
               {selectedIssue.student?.id ? (
                 <button type="button" className="link-button" onClick={() => navigate(["admin", "student", selectedIssue.student.id])}>
                   {selectedIssue.student.name || "Student"}
                 </button>
-              ) : (selectedIssue.student?.name || "Student")}
-            </dd></div>
-            <div><dt className="muted">Category</dt><dd style={{ margin: 0 }}>{selectedIssue.category}</dd></div>
-            <div><dt className="muted">Created</dt><dd style={{ margin: 0 }}>{formatDate(selectedIssue.created_at)}</dd></div>
-          </dl>
-          <p style={{ whiteSpace: "pre-wrap", lineHeight: 1.6 }}>{selectedIssue.description}</p>
-          <p className="muted">
-            Last updated: {selectedIssue.updated_at ? formatDate(selectedIssue.updated_at) : "Not available"}
-            <br />
-            Last updated by: {selectedIssue.updated_by?.name || "Not available"}
-            {selectedIssue.updated_by?.email ? ` (${selectedIssue.updated_by.email})` : ""}
-          </p>
-          <label style={{ display: "grid", gap: 6, maxWidth: 280 }}>
-            <span className="muted">Status</span>
-            <select
-              className="sort-select"
-              value={selectedIssue.status}
-              onChange={(event) => {
-                const nextStatus = event.target.value;
-                if (nextStatus !== selectedIssue.status) setPendingStatus(nextStatus);
-              }}
+              ) : <strong>{selectedIssue.student?.name || "Student"}</strong>}
+            </div>
+            <div><span>Category</span><strong>{selectedIssue.category}</strong></div>
+            <div><span>Raised</span><strong>{formatDate(selectedIssue.created_at)}</strong></div>
+            <div>
+              <span>Last updated</span>
+              <strong>
+                {selectedIssue.updated_at ? formatDate(selectedIssue.updated_at) : "—"}
+                {selectedIssue.updated_by?.name ? ` · ${selectedIssue.updated_by.name}` : ""}
+              </strong>
+            </div>
+          </div>
+
+          <div className="ticket-body">
+            <p className="ticket-label">What the student reported</p>
+            <p className="ticket-quote">{selectedIssue.description}</p>
+          </div>
+
+          {(selectedIssue.resolution_history || []).length ? (
+            <div className="ticket-thread">
+              <p className="ticket-label">Replies sent to the student</p>
+              {selectedIssue.resolution_history.map((reply, index) => (
+                <div className="ticket-reply" key={`${reply.responded_at || index}`}>
+                  <p>{reply.message}</p>
+                  <span className="muted">
+                    {reply.responded_by?.name || "Admin"}
+                    {reply.responded_at ? ` · ${formatDate(reply.responded_at)}` : ""}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : null}
+
+          <div className="ticket-reply-box">
+            <label htmlFor="ticket-response" className="ticket-label">
+              {selectedIssue.status === "CLOSED" ? "Add another reply" : "Your response to the student"}
+            </label>
+            <textarea
+              id="ticket-response"
+              className="rsa-textarea ticket-textarea"
+              value={responseText}
+              onChange={(event) => setResponseText(event.target.value)}
+              placeholder="Explain what happened and what you did — this is what the student reads."
               disabled={statusBusy}
-            >
-              <option value="IN_PROGRESS">IN PROGRESS</option>
-              <option value="CLOSED">CLOSED</option>
-            </select>
-          </label>
-        </div>
+            />
+            <div className="ticket-actions">
+              <span className="muted">
+                {selectedIssue.status === "CLOSED"
+                  ? "Reopening puts the ticket back in the queue."
+                  : "A ticket can't be closed without a response."}
+              </span>
+              {selectedIssue.status === "CLOSED" ? (
+                <button type="button" className="back-button" disabled={statusBusy} onClick={() => setPendingStatus("IN_PROGRESS")}>
+                  <RefreshCw size={16} /> Reopen ticket
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="primary-button"
+                  disabled={statusBusy || !responseText.trim()}
+                  title={responseText.trim() ? undefined : "Write a response first"}
+                  onClick={() => setPendingStatus("CLOSED")}
+                >
+                  <CheckCircle2 size={17} /> Send response &amp; close
+                </button>
+              )}
+            </div>
+          </div>
+        </article>
       ) : null}
       {!selectedIssue ? (
         data?.items?.length ? (
@@ -2377,8 +2452,17 @@ function AdminIssuesView({ data, loading, adminToken, navigate = () => {}, filte
         <div role="dialog" aria-modal="true" style={{ position: "fixed", inset: 0, zIndex: 1100, display: "grid", placeItems: "center", padding: 16, background: "rgba(16, 24, 40, 0.45)" }}>
           <div className="panel" style={{ width: "min(430px, 100%)", margin: 0 }} onClick={(event) => event.stopPropagation()}>
             <div className="panel-title"><CircleHelp size={20} /><h2>Update Issue Status</h2></div>
-            <p>Are you sure you want to mark this issue as <strong>{pendingStatus === "CLOSED" ? "CLOSED" : "IN PROGRESS"}</strong>?</p>
-            {pendingStatus === "CLOSED" ? <p className="muted">This will mark the issue as CLOSED.</p> : null}
+            {pendingStatus === "CLOSED" ? (
+              <>
+                <p>Close this ticket and send your response to the student?</p>
+                <p className="ticket-quote">{responseText.trim()}</p>
+              </>
+            ) : (
+              <p>
+                Reopen this ticket?
+                {responseText.trim() ? " Your note will be sent to the student as well." : ""}
+              </p>
+            )}
             <div className="rsa-actions">
               <button type="button" className="back-button" onClick={() => setPendingStatus(null)} disabled={statusBusy}>Cancel</button>
               <button type="button" className="primary-button" onClick={updateIssueStatus} disabled={statusBusy}>

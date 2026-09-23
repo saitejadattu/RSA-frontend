@@ -2687,6 +2687,143 @@ input:focus {
   font-size: 12px;
 }
 
+/* ---- admin ticket view ---- */
+.ticket {
+  display: grid;
+  gap: 16px;
+  padding: 18px 20px;
+  margin-bottom: 16px;
+  border: 1px solid #dfe4ea;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.ticket-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ticket-title {
+  margin: 0;
+  font-size: 18px;
+}
+
+.ticket-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 12px 18px;
+  padding: 14px 16px;
+  border-radius: 8px;
+  background: #f7f9fb;
+}
+
+.ticket-meta > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.ticket-meta span {
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #98a2b3;
+}
+
+.ticket-meta strong,
+.ticket-meta .link-button {
+  font-size: 13.5px;
+  overflow-wrap: anywhere;
+  justify-self: start;
+}
+
+.ticket-label {
+  margin: 0 0 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #98a2b3;
+}
+
+.ticket-quote {
+  margin: 0;
+  padding: 12px 14px;
+  border-left: 3px solid #cbd5e1;
+  border-radius: 0 8px 8px 0;
+  background: #f7f9fb;
+  white-space: pre-wrap;
+  line-height: 1.6;
+  font-size: 13.5px;
+}
+
+.ticket-thread {
+  display: grid;
+  gap: 8px;
+}
+
+.ticket-reply {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border-left: 3px solid #0f766e;
+  border-radius: 0 8px 8px 0;
+  background: #f0fdfa;
+}
+
+.ticket-reply p {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.6;
+  font-size: 13.5px;
+}
+
+.ticket-reply span {
+  font-size: 12px;
+}
+
+.ticket-reply-box {
+  display: grid;
+  gap: 8px;
+  padding-top: 14px;
+  border-top: 1px solid #eef2f5;
+}
+
+.ticket-textarea {
+  min-height: 110px;
+}
+
+.ticket-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.ticket-actions .muted {
+  font-size: 12px;
+}
+
+/* the student's copy of the same conversation */
+.sd-issue-reply {
+  display: grid;
+  gap: 4px;
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-left: 3px solid #0f766e;
+  border-radius: 0 8px 8px 0;
+  background: #f0fdfa;
+}
+
+.sd-issue-reply p {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.6;
+}
+
 /* the columns one master row changes, listed under the opening it belongs to */
 .rsa-change-list {
   margin: 4px 0 0;
