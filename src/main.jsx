@@ -2002,10 +2002,13 @@ function AdminDashboard({ adminToken, onLogout, route = [], navigate = () => {} 
       });
   }
 
-  function loadStudents() {
+  // The list is capped server-side, so the search has to run there too -
+  // filtering what was already sent hides every student past the cap.
+  function loadStudents(search = "") {
     setLoadingStudents(true);
     setError("");
-    apiRequest("/admin/students", { adminToken })
+    const query = search.trim() ? `?search=${encodeURIComponent(search.trim())}` : "";
+    apiRequest(`/admin/students${query}`, { adminToken })
       .then(setStudents)
       .catch((err) => setError(err.message))
       .finally(() => setLoadingStudents(false));
@@ -2158,7 +2161,7 @@ function AdminDashboard({ adminToken, onLogout, route = [], navigate = () => {} 
                 <RefreshCw className={loadingStudents ? "spin" : ""} size={18} />
               </button>
             </header>
-            <AdminStudentsView students={students} loading={loadingStudents} navigate={navigate} />
+            <AdminStudentsView students={students} loading={loadingStudents} navigate={navigate} onSearch={loadStudents} />
           </>
         ) : activeView === "issues" ? (
           <>
@@ -7311,14 +7314,28 @@ function listForMode(student, mode) {
   return student.applications || [];
 }
 
-function AdminStudentsView({ students, loading, navigate = () => {} }) {
+function AdminStudentsView({ students, loading, navigate = () => {}, onSearch }) {
   const [expanded, setExpanded] = useState(null);
   const [showAll, setShowAll] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [sortBy, setSortBy] = useState("name");
   const [placementFilter, setPlacementFilter] = useState("all");
 
-  if (loading) return <PanelLoader />;
+  // The server holds every student; the list it sends back is capped. Typing
+  // therefore re-asks the server rather than filtering the page in the browser,
+  // which would never find a student sitting past the cap. Held in a ref so a
+  // parent re-render cannot restart the search.
+  const searchRef = useRef(onSearch);
+  searchRef.current = onSearch;
+  const firstSearch = useRef(true);
+  useEffect(() => {
+    if (firstSearch.current) {
+      firstSearch.current = false;
+      return undefined;
+    }
+    const timer = setTimeout(() => searchRef.current?.(searchTerm), 300);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
 
   function toggle(student, mode) {
     setShowAll(false);
@@ -7382,7 +7399,9 @@ function AdminStudentsView({ students, loading, navigate = () => {} }) {
         {students.length ? <span className="title-count">{sortedStudents.length}</span> : null}
       </div>
 
-      {students.length > 0 && (
+      {/* Kept mounted while a search is running or empty-handed, so the box
+          never disappears from under whoever is typing in it. */}
+      {students.length > 0 || searchTerm || loading ? (
         <div className="students-controls">
           <div className="search-field">
             <input
@@ -7417,9 +7436,11 @@ function AdminStudentsView({ students, loading, navigate = () => {} }) {
             </div>
           </div>
         </div>
-      )}
+      ) : null}
 
-      {sortedStudents.length ? (
+      {loading ? (
+        <PanelLoader />
+      ) : sortedStudents.length ? (
         <div className="admin-table students-table scrollable" data-scroll-key="students">
           <div className="admin-head">
             <span>Student</span>
@@ -7481,7 +7502,15 @@ function AdminStudentsView({ students, loading, navigate = () => {} }) {
           })}
         </div>
       ) : (
-        <div className="empty-state compact"><p>{searchTerm || placementFilter !== "all" ? "No students match your filters." : "No students found."}</p></div>
+        <div className="empty-state compact">
+          <p>
+            {searchTerm
+              ? `No student matches “${searchTerm}”. Name, phone and email are all searched.`
+              : placementFilter !== "all"
+                ? "No students match your filters."
+                : "No students found."}
+          </p>
+        </div>
       )}
     </section>
   );
